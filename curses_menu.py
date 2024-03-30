@@ -101,7 +101,8 @@ MatchString = namedtuple("MatchString", 'content ismatch')
 
 DEBUG=True
 
-def match_string_to_substr_selector(cur_matches: list, substr: str, stdscr, prev_offset, debug_line) -> list:
+def match_string_to_substr_selector(substr):
+  def selector(cur_matches: list, stdscr, prev_offset, debug_line) -> list:
     # the string matcher works on the current reminder
     last_substr = cur_matches[-1].content
 
@@ -118,16 +119,18 @@ def match_string_to_substr_selector(cur_matches: list, substr: str, stdscr, prev
 
     return matches
 
+  return selector
+
 basic_type_keywords = {
         'int': lambda s: s.isnumeric()
         }
 
-def match_string_field_to_basic_type(cur_matches: list, selector_keyword: str, stdscr, prev_offset, debug_line) -> list:
+def match_string_field_to_basic_type(selector_keyword: str):
+  type_selector = basic_type_keywords.get(selector_keyword)
+  if type_selector is None:
+      return match_string_to_substr_selector(selector_keyword)
 
-    selector = basic_type_keywords.get(selector_keyword[1:])
-    if not selector:
-        return match_string_to_substr_selector(cur_matches, selector_keyword, stdscr, prev_offset, debug_line)
-
+  def selector(cur_matches: list, stdscr, prev_offset, debug_line) -> list:
     # else match the string fields
     # a "field" is a .-separated part in the string
     # for simplicity let's start from the next "complete field"
@@ -145,7 +148,7 @@ def match_string_field_to_basic_type(cur_matches: list, selector_keyword: str, s
     #if any(selector(f) for f in fields)
     matched_field_i = None
     for i, f in enumerate(fields):
-        if selector(f):
+        if type_selector(f):
             matched_field_i = i
 
     if DEBUG:
@@ -178,16 +181,19 @@ def match_string_field_to_basic_type(cur_matches: list, selector_keyword: str, s
 
     return cur_matches[:-1] + new_matches
 
+  return selector
+
 def dispatch_selectors(selector_string: str):
     
     if selector_string[0] == '.':
-        return match_string_field_to_basic_type
+        return match_string_field_to_basic_type(selector_string[1:])
 
-    return match_string_to_substr_selector
+    return match_string_to_substr_selector(selector_string)
 
-def match_string_to_selectors(string: str, subs_list: list, stdscr, i) -> list:
+def match_string_to_selectors(string: str, subs_list: list, stdscr, debug_line, prev_offset) -> list:
     matches = [MatchString(string[:], False)]
-    prev_offset = 0
+    #prev_offset = 0
+
     for p in subs_list:
         #last_substr = matches[-1].content
 
@@ -207,7 +213,7 @@ def match_string_to_selectors(string: str, subs_list: list, stdscr, i) -> list:
         selector = dispatch_selectors(p)
         if selector is None: continue
 
-        match_res = selector(matches, p, stdscr, prev_offset, i)
+        match_res = selector(matches, stdscr, prev_offset, debug_line)
         if match_res is None: return # every selector must match
         matches = match_res
         prev_offset += 20 + len(matches[-1].content)
@@ -256,8 +262,13 @@ def main(stdscr):
             #matched_opts = [o for o in matched_opts if substr in o]
             # simply:
             matched_opts = []
-            for i, opt in enumerate(opts):
-                matches = match_string_to_selectors(opt, patterns, stdscr, i)
+            for debug_line, opt in enumerate(opts):
+                prev_offset = 0
+                if DEBUG:
+                    stdscr.addstr(20+debug_line, prev_offset, opt)
+                    prev_offset += 3 + len(opt)
+
+                matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
                 if matches: matched_opts.append(matches)
 
         cur_line = 8
