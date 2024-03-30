@@ -101,6 +101,8 @@ MatchString = namedtuple("MatchString", 'content ismatch')
 
 DEBUG=True
 
+FIELD_SEPARATOR='.'
+
 def match_string_to_substr_selector(substr):
   def selector(cur_matches: list, stdscr, prev_offset, debug_line) -> list:
     # the string matcher works on the current reminder
@@ -131,17 +133,17 @@ def match_string_field_to_basic_type(selector_keyword: str):
       return match_string_to_substr_selector(selector_keyword)
 
   def selector(cur_matches: list, stdscr, prev_offset, debug_line) -> list:
-    # else match the string fields
+    # match the string fields
     # a "field" is a .-separated part in the string
     # for simplicity let's start from the next "complete field"
     # i.e. the one that was not touched by the previous selectors
     last_substr = cur_matches[-1].content
-    if len(cur_matches)>1 and cur_matches[-2].content[-1] != '.':
+    if len(cur_matches)>1 and cur_matches[-2].content[-1] != FIELD_SEPARATOR:
         # then the selector matching stopped in the middle of a field
-        cutoff, *fields = last_substr.split('.')
+        cutoff, *fields = last_substr.split(FIELD_SEPARATOR)
 
     else:
-        fields = last_substr.split('.')
+        fields = last_substr.split(FIELD_SEPARATOR)
         cutoff = None
 
     # find the first one that matches
@@ -167,15 +169,15 @@ def match_string_field_to_basic_type(selector_keyword: str):
     match_field = fields[matched_field_i]
     new_matches = []
     if cutoff:
-        pre = '.'.join([cutoff] + fields[:matched_field_i])
+        pre = FIELD_SEPARATOR.join([cutoff] + fields[:matched_field_i])
     else:
-        pre = '.'.join(fields[:matched_field_i])
+        pre = FIELD_SEPARATOR.join(fields[:matched_field_i])
 
-    post = '.'.join(fields[matched_field_i+1:])
+    post = FIELD_SEPARATOR.join(fields[matched_field_i+1:])
     if post: # if not empty
-        post = '.' + post
+        post = FIELD_SEPARATOR + post
 
-    new_matches.append(MatchString(pre + '.', False))
+    new_matches.append(MatchString(pre + FIELD_SEPARATOR, False))
     new_matches.append(MatchString(match_field, True))
     new_matches.append(MatchString(post, False))
 
@@ -183,10 +185,53 @@ def match_string_field_to_basic_type(selector_keyword: str):
 
   return selector
 
+def match_string_field_child(child_substr: str):
+    def selector(cur_matches: list, stdscr, prev_offset, debug_line) -> list:
+        # check if the child field contains child_substr
+        last_substr = cur_matches[-1].content
+
+        cutoff = None
+        if len(cur_matches)>1 and cur_matches[-2].content[-1] == FIELD_SEPARATOR:
+            # the child field starts from the start of the last_substr
+            fields = last_substr.split(FIELD_SEPARATOR)
+
+        elif FIELD_SEPARATOR not in last_substr:
+            # i.e. the case when the matching cursor sits
+            # in the middle of the last field
+            # -- no child fields at this point
+            return None
+
+        else:
+            cutoff, *fields = last_substr.split(FIELD_SEPARATOR)
+
+        child_field = fields[0]
+
+        if child_substr not in child_field:
+            return None
+
+        # make the list of matches
+        ind = child_field.index(child_substr)
+        pre, post = child_field[:ind], child_field[ind+len(child_substr):]
+
+        # add the cutoff to pre, if needed
+        if cutoff is not None:
+            pre = cutoff + '.' + pre
+
+        post = '.'.join([post] + fields[1:])
+
+        matches = cur_matches[:-1] + [MatchString(pre, False)] + [MatchString(child_substr, True)] + [MatchString(post, False)]
+
+        return matches
+
+    return selector
+
 def dispatch_selectors(selector_string: str):
-    
+
     if selector_string[0] == '.':
         return match_string_field_to_basic_type(selector_string[1:])
+
+    elif selector_string[0] == '>':
+        return match_string_field_child(selector_string[1:])
 
     return match_string_to_substr_selector(selector_string)
 
