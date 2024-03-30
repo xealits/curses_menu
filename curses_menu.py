@@ -224,6 +224,31 @@ def match_string_to_selectors(string: str, subs_list: list, stdscr, debug_line, 
 
     return matches
 
+def comline_remove_last_word(comline_cur, comline):
+    # damn
+    if comline_cur==0:
+        return None
+
+    #
+    starting_cur = comline_cur
+    # move the white space
+    cur_char = comline[comline_cur-1]
+    while cur_char.isspace() and comline_cur>0:
+        comline_cur -= 1
+        cur_char = comline[comline_cur-1]
+
+    if comline_cur==0:
+        new_comline = comline[starting_cur:]
+        return new_comline, comline_cur
+
+    while not cur_char.isspace() and comline_cur>0:
+        comline_cur -= 1
+        cur_char = comline[comline_cur-1]
+
+    new_comline = comline[:comline_cur] + comline[starting_cur:]
+
+    return new_comline, comline_cur
+
 def main(stdscr):
     global comline, comline_cur
 
@@ -248,7 +273,7 @@ def main(stdscr):
         #stdscr.refresh()
 
         stdscr.addstr(4, 0, f'user cur: {comline_cur} {len(comline)}')
-        stdscr.addstr(5, 0, f'user char: {k} {len(k)} {ord(k[0])}')
+        stdscr.addstr(5, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
 
         # act on the user input as a set of substrings to find
         patterns = comline.split()
@@ -297,13 +322,23 @@ def main(stdscr):
             # otherwise -1 is sent (Escape)
             stdscr.nodelay(True)
             n = stdscr.getch()
+
             if n == -1:
                 # Escape was pressed
                 sys.exit(0)
+
             # Return to delay
             stdscr.nodelay(False)
             # run something on alt-<n>
             #cur.puts(f'user alt-char: {n}')
+
+            # else it's an ALT
+            if n == ord('w'):
+                #stdscr.addstr(50, 0, "alt-w !")
+                res = comline_remove_last_word(comline_cur, comline)
+                if not res:
+                    continue
+                comline, comline_cur = res
 
         if k in ("KEY_BACKSPACE", "\x7f"):
             if comline_cur>0:
@@ -313,27 +348,10 @@ def main(stdscr):
             continue
 
         if ord(k[0]) == KEY_CTRLW: # remove the last word
-            # damn
-            if comline_cur==0:
+            res = comline_remove_last_word(comline_cur, comline)
+            if not res:
                 continue
-
-            #
-            starting_cur = comline_cur
-            # move the white space
-            cur_char = comline[comline_cur-1]
-            while cur_char.isspace() and comline_cur>0:
-                comline_cur -= 1
-                cur_char = comline[comline_cur-1]
-
-            if comline_cur==0:
-                comline = comline[starting_cur:]
-                continue
-
-            while not cur_char.isspace() and comline_cur>0:
-                comline_cur -= 1
-                cur_char = comline[comline_cur-1]
-
-            comline = comline[:comline_cur] + comline[starting_cur:]
+            comline, comline_cur = res
 
         elif k == "KEY_UP":
             pass
