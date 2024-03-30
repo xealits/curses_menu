@@ -34,6 +34,27 @@ from curses.textpad import Textbox, rectangle
 
 opts = 'klasd qwe pod 34 kjnd temp pre foo fuz toopoomoobooo'.split()
 
+def iteritems_recursive(d):
+    for k,v in d.items():
+      if isinstance(v, dict):
+        for k1,v1 in iteritems_recursive(v):
+          yield (k,)+k1, v1
+      else:
+        yield (k,),v
+
+some_nested_structure = {'some':
+        {'nested': 2, 'struct': {3: 'bar', 'baz': 5}},
+        'foo': 5,
+        'more': {'nestings': 67, 5: 'five'},
+        'and': 'only_string',
+        'only_strings': {'foo': 'bar', 'baz': 'qwe'}
+        }
+
+opts = []
+for p,v in iteritems_recursive(some_nested_structure):
+    #print(f'{p} -> {v}')
+    opts.append('.'.join([str(i) for i in p]) + '.' + str(v))
+
 class Curs:
     def __init__(self, scr, init_x=0, init_y=0):
         self.__scr = scr
@@ -80,24 +101,116 @@ MatchString = namedtuple("MatchString", 'content ismatch')
 
 DEBUG=True
 
-def match_string_to_subs(string: str, subs_list: list, stdscr, i) -> list:
+def match_string_to_substr_selector(cur_matches: list, substr: str, stdscr, prev_offset, debug_line) -> list:
+    # the string matcher works on the current reminder
+    last_substr = cur_matches[-1].content
+
+    if substr not in last_substr:
+        return None
+
+    if DEBUG:
+        stdscr.addstr(20+debug_line, prev_offset, last_substr)
+        prev_offset += 1 + len(last_substr)
+
+    ind = last_substr.index(substr)
+    pre, post = last_substr[:ind], last_substr[ind+len(substr):]
+    matches = cur_matches[:-1] + [MatchString(pre, False)] + [MatchString(substr, True)] + [MatchString(post, False)]
+
+    return matches
+
+basic_type_keywords = {
+        'int': lambda s: s.isnumeric()
+        }
+
+def match_string_field_to_basic_type(cur_matches: list, selector_keyword: str, stdscr, prev_offset, debug_line) -> list:
+
+    selector = basic_type_keywords.get(selector_keyword[1:])
+    if not selector:
+        return match_string_to_substr_selector(cur_matches, selector_keyword, stdscr, prev_offset, debug_line)
+
+    # else match the string fields
+    # a "field" is a .-separated part in the string
+    # for simplicity let's start from the next "complete field"
+    # i.e. the one that was not touched by the previous selectors
+    last_substr = cur_matches[-1].content
+    if len(cur_matches)>1 and cur_matches[-2].content[-1] != '.':
+        # then the selector matching stopped in the middle of a field
+        cutoff, *fields = last_substr.split('.')
+
+    else:
+        fields = last_substr.split('.')
+        cutoff = None
+
+    # find the first one that matches
+    #if any(selector(f) for f in fields)
+    matched_field_i = None
+    for i, f in enumerate(fields):
+        if selector(f):
+            matched_field_i = i
+
+    if DEBUG:
+        #prev_offset += 1 + len(last_substr)
+        stdscr.addstr(20+debug_line, prev_offset, f'None: {last_substr} -> {cutoff} {fields}')
+        #prev_offset += 5 + len('None')
+
+    if matched_field_i is None: # the matching failed for this option
+        # if there were no fields, i.e. the whole last string was a cutoff
+        # it fails too
+
+        return None
+
+    # reassamble the fields back into strings
+    # and mark the matching field
+    match_field = fields[matched_field_i]
+    new_matches = []
+    if cutoff:
+        pre = '.'.join([cutoff] + fields[:matched_field_i])
+    else:
+        pre = '.'.join(fields[:matched_field_i])
+
+    post = '.'.join(fields[matched_field_i+1:])
+    if post: # if not empty
+        post = '.' + post
+
+    new_matches.append(MatchString(pre + '.', False))
+    new_matches.append(MatchString(match_field, True))
+    new_matches.append(MatchString(post, False))
+
+    return cur_matches[:-1] + new_matches
+
+def dispatch_selectors(selector_string: str):
+    
+    if selector_string[0] == '.':
+        return match_string_field_to_basic_type
+
+    return match_string_to_substr_selector
+
+def match_string_to_selectors(string: str, subs_list: list, stdscr, i) -> list:
     matches = [MatchString(string[:], False)]
     prev_offset = 0
     for p in subs_list:
-        last_substr = matches[-1].content
+        #last_substr = matches[-1].content
 
-        # all patterns must match
-        # return None if one does not match
-        if p not in last_substr:
-            return None
+        ## all patterns must match
+        ## return None if one does not match
+        #if p not in last_substr:
+        #    return None
 
-        if DEBUG:
-            stdscr.addstr(20+i, prev_offset, last_substr)
-            prev_offset += 1 + len(last_substr)
+        #if DEBUG:
+        #    stdscr.addstr(20+i, prev_offset, last_substr)
+        #    prev_offset += 1 + len(last_substr)
 
-        ind = last_substr.index(p)
-        pre, post = last_substr[:ind], last_substr[ind+len(p):]
-        matches = matches[:-1] + [MatchString(pre, False)] + [MatchString(p, True)] + [MatchString(post, False)]
+        #ind = last_substr.index(p)
+        #pre, post = last_substr[:ind], last_substr[ind+len(p):]
+        #matches = matches[:-1] + [MatchString(pre, False)] + [MatchString(p, True)] + [MatchString(post, False)]
+
+        selector = dispatch_selectors(p)
+        if selector is None: continue
+
+        match_res = selector(matches, p, stdscr, prev_offset, i)
+        if match_res is None: return # every selector must match
+        matches = match_res
+        prev_offset += 20 + len(matches[-1].content)
 
     ## if no matches were found, return None?
     #if len(matches) == 1 and not matches[0].ismatch:
@@ -144,7 +257,7 @@ def main(stdscr):
             # simply:
             matched_opts = []
             for i, opt in enumerate(opts):
-                matches = match_string_to_subs(opt, patterns, stdscr, i)
+                matches = match_string_to_selectors(opt, patterns, stdscr, i)
                 if matches: matched_opts.append(matches)
 
         cur_line = 8
