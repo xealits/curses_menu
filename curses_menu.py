@@ -110,10 +110,11 @@ def main(stdscr):
 
     curses.start_color()
     curses.use_default_colors()
-    for i in range(0, curses.COLORS):
-        curses.init_pair(i + 1, i, -1)
-    highligh_color = 31
-    #curses.init_pair(highligh_color + 1, highligh_color, -1)
+    highligh_color = 30
+    curses.init_pair(1, highligh_color, -1)
+    highlightText = curses.color_pair( 1 )
+    #curses.init_pair(1,curses.COLOR_BLACK, curses.COLOR_CYAN)
+    normalText = curses.A_NORMAL
 
     stdscr.clear()
     cur = Curs(stdscr)
@@ -151,7 +152,7 @@ def main(stdscr):
             # split into substrings
             stdscr.addstr(cur_line, 0, f'user match: for ')
             for substr in matched_o:
-                stdscr.addstr(substr.content, curses.color_pair(highligh_color) if substr.ismatch else curses.color_pair(-1))
+                stdscr.addstr(substr.content, highlightText if substr.ismatch else normalText)
             cur_line += 1
 
         stdscr.move(0, len(prompt) + comline_cur)
