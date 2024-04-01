@@ -99,7 +99,7 @@ prompt  = "> "
 from collections import namedtuple
 MatchString = namedtuple("MatchString", 'content ismatch')
 
-DEBUG=True
+DEBUG=False
 
 FIELD_SEPARATOR='.'
 
@@ -302,6 +302,8 @@ def comline_remove_last_word(comline_cur, comline):
 def main(stdscr):
     global comline, comline_cur
 
+    __max_y, __max_x = stdscr.getmaxyx()
+
     curses.start_color()
     curses.use_default_colors()
     highligh_color = 30
@@ -349,6 +351,9 @@ def main(stdscr):
         cur_line = 8
         for matched_o in matched_opts:
             # split into substrings
+            if cur_line >= __max_y: # if it goes outside the screen
+                break
+
             stdscr.addstr(cur_line, 0, f'user match: for ')
             for substr in matched_o:
                 stdscr.addstr(substr.content, highlightText if substr.ismatch else normalText)
@@ -513,4 +518,13 @@ def main(stdscr):
     stdscr.getch()
 
 
-wrapper(main)
+if __name__ == "__main__":
+    #global opts
+    # the asyncua example
+    import asyncio
+    from get_opcua_datapoints import _uals
+
+    #opts = await _uals()
+    opts = asyncio.run(_uals())
+
+    wrapper(main)
