@@ -206,6 +206,11 @@ def match_string_field_child(child_substr: str):
 
         child_field = fields[0]
 
+        if DEBUG:
+            #prev_offset += 1 + len(last_substr)
+            stdscr.addstr(20+debug_line, prev_offset, f'None: {last_substr} -> {cutoff} {fields} | {child_field}')
+            #prev_offset += 5 + len('None')
+
         if child_substr not in child_field:
             return None
 
