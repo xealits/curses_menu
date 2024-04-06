@@ -3,10 +3,6 @@ from asyncua import Node, Client #, Server
 from asyncua.tools import add_minimum_args, add_common_args, parse_args, _configure_client_with_args, get_node, _lsprint_0, _lsprint_1, _lsprint_long
 import sys, concurrent
 
-import argparse
-
-parser = argparse.ArgumentParser(description="Browse OPC-UA node and filter the result with the curses_manu (fzf style)")
-
 #add_minimum_args(parser)
 
 # just browse to the max depth, get the full list of all the DPs
@@ -43,7 +39,13 @@ async def act_on_node(node, res_list=[], act_on_desc=print_node_description):
         else:
             raise Exception('unknown version of asyncua')
 
-async def _uals():
+async def _uals(parser) -> list:
+    '''_uals(parser)
+
+    parser: argparse.ArgumentParser
+    returns: a list of strings with full DP names
+    '''
+
     #parser = argparse.ArgumentParser(description="Browse OPC-UA node and print result")
     add_common_args(parser)
     parser.add_argument(
@@ -88,7 +90,10 @@ async def _uals():
     return all_the_dps
 
 if __name__ == '__main__':
-    dps = asyncio.run(_uals())
+    import argparse
+    parser = argparse.ArgumentParser(description="Browse OPC-UA server and print all the DPs")
+
+    dps = asyncio.run(_uals(parser))
     #dps = await _uals()
 
     print(f'got these: {dps}')

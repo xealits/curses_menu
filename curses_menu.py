@@ -519,12 +519,21 @@ def main(stdscr):
 
 
 if __name__ == "__main__":
-    #global opts
-    # the asyncua example
-    import asyncio
-    from get_opcua_datapoints import _uals
+    from sys import argv
 
-    #opts = await _uals()
-    opts = asyncio.run(_uals())
+    if '--demo' in argv:
+        print('running the demo')
+
+    else:
+        import argparse
+        parser = argparse.ArgumentParser(description="Demo the menu or browse an OPC-UA server")
+
+        # the asyncua example
+        import asyncio
+        from get_opcua_datapoints import _uals
+
+        #opts = await _uals()
+        opts = asyncio.run(_uals(parser))
 
     wrapper(main)
+
