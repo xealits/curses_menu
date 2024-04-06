@@ -526,7 +526,16 @@ if __name__ == "__main__":
 
     else:
         import argparse
-        parser = argparse.ArgumentParser(description="Demo the menu or browse an OPC-UA server")
+        parser = argparse.ArgumentParser(
+            formatter_class = argparse.RawDescriptionHelpFormatter,
+            description = "Demo the menu with --demo or browse an OPC-UA server via uasync",
+            epilog = """Example:
+   python3 curses_menu.py -u localhost:48010 -l0 -d 3 -n "ns=2;s=Can01"
+   python3 curses_menu.py -u localhost:4841  -l0 -d 3 -n "ns=2;s=pp2"
+
+Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --version.
+"""
+        )
 
         # the asyncua example
         import asyncio
