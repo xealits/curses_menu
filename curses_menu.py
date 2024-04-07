@@ -391,14 +391,16 @@ def main(stdscr):
     curses.use_default_colors()
     highligh_color = 30
     curses.init_pair(1, highligh_color, -1)
-    highlightText = curses.color_pair( 1 )
+    styleMatchedText = curses.color_pair( 1 )
     #curses.init_pair(1,curses.COLOR_BLACK, curses.COLOR_CYAN)
-    normalText = curses.A_NORMAL
+    styleNormalText = curses.A_NORMAL
+    styleSelectLine = curses.A_BOLD
 
     stdscr.clear()
 
     prompt = "> "
     k = " "
+    cur_select_cursor = 0
     while True:
         stdscr.erase()
 
@@ -430,16 +432,31 @@ def main(stdscr):
                 matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
                 if matches: matched_opts.append(matches)
 
-        cur_line = 8
-        for matched_o in matched_opts:
+        if cur_select_cursor >= len(matched_opts):
+            cur_select_cursor = len(matched_opts) - 1
+            # it will make the cursor negative when there are no matches
+
+        if cur_select_cursor < 0 and len(matched_opts) > 0:
+            cur_select_cursor = 0
+
+        line_offset = 8
+        for cur_line, matched_o in enumerate(matched_opts):
             # split into substrings
             if cur_line >= __max_y: # if it goes outside the screen
                 break
 
-            stdscr.addstr(cur_line, 0, f'')
+            if cur_line == cur_select_cursor:
+                line_opt = styleSelectLine
+                select_prompt = '> '
+
+            else:
+                line_opt = styleNormalText
+                select_prompt = '  '
+
+            stdscr.addstr(line_offset+cur_line, 0, select_prompt)
             for substr in matched_o:
-                stdscr.addstr(substr.content, highlightText if substr.ismatch else normalText)
-            cur_line += 1
+                opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
+                stdscr.addstr(substr.content, opt)
 
         stdscr.move(0, len(prompt) + comline.cur_pos)
 
@@ -496,10 +513,14 @@ def main(stdscr):
         elif ord(k[0]) == 0: # the null character
             pass
 
+        # up-down control the selection among the matched options
         elif k == "KEY_UP":
-            pass
+            if cur_select_cursor > 0:
+                cur_select_cursor -= 1
         elif k == "KEY_DOWN":
-            pass
+            if cur_select_cursor < len(matched_opts) - 1:
+                cur_select_cursor += 1
+
         elif k == "KEY_END":
             #comline_cur = len(comline)
             comline.moveto_end()
