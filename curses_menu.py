@@ -325,7 +325,11 @@ def main(stdscr):
         #stdscr.refresh()
 
         stdscr.addstr(4, 0, f'user cur: {comline_cur} {len(comline)}')
-        stdscr.addstr(5, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+        if ord(k[0]) != 0:
+            stdscr.addstr(5, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+
+        else:
+            stdscr.addstr(5, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
 
         # act on the user input as a set of substrings to find
         patterns = comline.split()
@@ -354,7 +358,7 @@ def main(stdscr):
             if cur_line >= __max_y: # if it goes outside the screen
                 break
 
-            stdscr.addstr(cur_line, 0, f'user match: for ')
+            stdscr.addstr(cur_line, 0, f'')
             for substr in matched_o:
                 stdscr.addstr(substr.content, highlightText if substr.ismatch else normalText)
             cur_line += 1
@@ -395,18 +399,21 @@ def main(stdscr):
                     continue
                 comline, comline_cur = res
 
-        if k in ("KEY_BACKSPACE", "\x7f"):
+        elif k in ("KEY_BACKSPACE", "\x7f"):
             if comline_cur>0:
               comline = comline[:comline_cur-1] + comline[comline_cur:]
               comline_cur-=1
 
             continue
 
-        if ord(k[0]) == KEY_CTRLW: # remove the last word
+        elif ord(k[0]) == KEY_CTRLW: # remove the last word
             res = comline_remove_last_word(comline_cur, comline)
             if not res:
                 continue
             comline, comline_cur = res
+
+        elif ord(k[0]) == 0: # the null character
+            pass
 
         elif k == "KEY_UP":
             pass
