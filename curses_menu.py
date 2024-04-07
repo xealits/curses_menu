@@ -92,10 +92,6 @@ class Curs:
         self.__y -= 1
         return lambda char: None
 
-comline = ""
-comline_cur = 0
-prompt  = "> "
-
 from collections import namedtuple
 MatchString = namedtuple("MatchString", 'content ismatch')
 
@@ -274,7 +270,7 @@ def match_string_to_selectors(string: str, subs_list: list, stdscr, debug_line, 
 
     return matches
 
-def comline_remove_last_word(comline_cur, comline):
+def _comline_remove_last_word(comline_cur, comline):
     # damn
     if comline_cur==0:
         return None
@@ -299,8 +295,95 @@ def comline_remove_last_word(comline_cur, comline):
 
     return new_comline, comline_cur
 
+class Comline:
+    def __init__(self):
+        self.comline = ""
+        self.cur_pos = 0
+    def __repr__(self):
+        return f'Comline()'
+    def __str__(self):
+        return f'{self.comline}'
+    def __len__(self):
+        return len(self.comline)
+    def split(self):
+        return self.comline.split()
+    def remove_last_word(self):
+        res = _comline_remove_last_word(self.cur_pos, self.comline)
+        if res:
+            self.comline, self.cur_pos = res
+
+    def backspace(self):
+        if self.cur_pos>0:
+          self.comline = self.comline[:self.cur_pos-1] + self.comline[self.cur_pos:]
+          self.cur_pos -= 1
+
+    def insert(self, k):
+        assert k.isprintable()
+        self.comline = self.comline[:self.cur_pos] + k + self.comline[self.cur_pos:] # chr(k)
+        self.cur_pos += 1
+
+    def moveto_end(self):
+        self.cur_pos = len(self.comline)
+    def moveto_home(self):
+        self.cur_pos = 0
+    def moveto_left(self):
+        self.cur_pos -= 1 if self.cur_pos>0 else 0
+    def moveto_right(self):
+        self.cur_pos += 1 if self.cur_pos<len(self.comline) else 0
+
+    def moveto_right_word(self):
+        if self.cur_pos == len(self.comline):
+            return
+        # last char -- move to the end
+        elif self.cur_pos == len(self.comline)-1:
+            self.cur_pos += 1
+            return
+
+        self.cur_pos += 1
+
+        # pass white space
+        cur_char = self.comline[self.cur_pos]
+        while cur_char.isspace() and self.cur_pos<len(self.comline):
+            self.cur_pos += 1
+            if self.cur_pos == len(self.comline):
+                break
+            cur_char = self.comline[self.cur_pos]
+
+        if self.cur_pos == len(self.comline):
+            return
+
+        # pass letters
+        cur_char = self.comline[self.cur_pos]
+        while not cur_char.isspace() and self.cur_pos<len(self.comline):
+            self.cur_pos += 1
+            if self.cur_pos == len(self.comline):
+                break
+            cur_char = self.comline[self.cur_pos]
+
+        return
+
+    def moveto_left_word(self):
+        if self.cur_pos == 0:
+            return
+
+        # pass white space
+        cur_char = self.comline[self.cur_pos-1]
+        while cur_char.isspace() and self.cur_pos>0:
+            self.cur_pos -= 1
+            cur_char = self.comline[self.cur_pos-1]
+
+        if self.cur_pos == 0:
+            return
+
+        # pass letters
+        cur_char = self.comline[self.cur_pos-1]
+        while not cur_char.isspace() and self.cur_pos>0:
+            self.cur_pos -= 1
+            cur_char = self.comline[self.cur_pos-1]
+
 def main(stdscr):
-    global comline, comline_cur
+    #global comline, comline_cur
+    comline = Comline()
 
     __max_y, __max_x = stdscr.getmaxyx()
 
@@ -313,18 +396,18 @@ def main(stdscr):
     normalText = curses.A_NORMAL
 
     stdscr.clear()
-    cur = Curs(stdscr)
 
+    prompt = "> "
     k = " "
     while True:
         stdscr.erase()
 
-        stdscr.addstr(0, 0, prompt + comline)
-        stdscr.addstr(1, 0, comline)
-        stdscr.addstr(2, 0, ' '*comline_cur + "^")
+        stdscr.addstr(0, 0, f'{prompt}{comline}')
+        #stdscr.addstr(1, 0, comline)
+        stdscr.addstr(1, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
         #stdscr.refresh()
 
-        stdscr.addstr(4, 0, f'user cur: {comline_cur} {len(comline)}')
+        stdscr.addstr(4, 0, f'user cur: {comline.cur_pos} {len(comline)}')
         if ord(k[0]) != 0:
             stdscr.addstr(5, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
 
@@ -335,13 +418,8 @@ def main(stdscr):
         patterns = comline.split()
 
         matched_opts = [[MatchString(o, False)] for o in opts]
-        # seave throush the substrings
+        # seave through the substrings
         if patterns:
-            #re_pattern = '.*' + '.*'.join(patterns) + '.*'
-            #stdscr.addstr(7, 0, f're: {re_pattern}')
-            #matched_opts = [o for o in opts if re.match(re_pattern, o)]
-            #matched_opts = [o for o in matched_opts if substr in o]
-            # simply:
             matched_opts = []
             for debug_line, opt in enumerate(opts):
                 prev_offset = 0
@@ -363,7 +441,7 @@ def main(stdscr):
                 stdscr.addstr(substr.content, highlightText if substr.ismatch else normalText)
             cur_line += 1
 
-        stdscr.move(0, len(prompt) + comline_cur)
+        stdscr.move(0, len(prompt) + comline.cur_pos)
 
         k = stdscr.getkey()
         #k = stdscr.getch()
@@ -394,23 +472,26 @@ def main(stdscr):
             # else it's an ALT
             if n == ord('w'):
                 #stdscr.addstr(50, 0, "alt-w !")
-                res = comline_remove_last_word(comline_cur, comline)
-                if not res:
-                    continue
-                comline, comline_cur = res
+                #res = comline_remove_last_word(comline_cur, comline)
+                #if not res:
+                #    continue
+                #comline, comline_cur = res
+                comline.remove_last_word()
 
         elif k in ("KEY_BACKSPACE", "\x7f"):
-            if comline_cur>0:
-              comline = comline[:comline_cur-1] + comline[comline_cur:]
-              comline_cur-=1
+            #if comline_cur>0:
+            #  comline = comline[:comline_cur-1] + comline[comline_cur:]
+            #  comline_cur-=1
 
+            comline.backspace()
             continue
 
         elif ord(k[0]) == KEY_CTRLW: # remove the last word
-            res = comline_remove_last_word(comline_cur, comline)
-            if not res:
-                continue
-            comline, comline_cur = res
+            #res = comline_remove_last_word(comline_cur, comline)
+            #if not res:
+            #    continue
+            #comline, comline_cur = res
+            comline.remove_last_word()
 
         elif ord(k[0]) == 0: # the null character
             pass
@@ -420,9 +501,11 @@ def main(stdscr):
         elif k == "KEY_DOWN":
             pass
         elif k == "KEY_END":
-            comline_cur = len(comline)
+            #comline_cur = len(comline)
+            comline.moveto_end()
         elif k == "KEY_HOME":
-            comline_cur = 0
+            #comline_cur = 0
+            comline.moveto_home()
         elif k == "KEY_NPAGE": # page down
             pass
         elif k == "KEY_PPAGE": # page up
@@ -434,64 +517,23 @@ def main(stdscr):
             pass
 
         elif k == "kRIT5": # ctrl-right
-            if comline_cur == len(comline):
-                continue
-            # last char -- move to the end
-            elif comline_cur == len(comline)-1:
-                comline_cur += 1
-                continue
-
-            comline_cur += 1
-
-            # pass white space
-            cur_char = comline[comline_cur]
-            while cur_char.isspace() and comline_cur<len(comline):
-                comline_cur += 1
-                if comline_cur == len(comline):
-                    break
-                cur_char = comline[comline_cur]
-
-            if comline_cur == len(comline):
-                continue
-
-            # pass letters
-            cur_char = comline[comline_cur]
-            while not cur_char.isspace() and comline_cur<len(comline):
-                comline_cur += 1
-                if comline_cur == len(comline):
-                    break
-                cur_char = comline[comline_cur]
-
-            continue
+            comline.moveto_right_word()
 
         elif k == "kLFT5": # ctrl-left
-            if comline_cur == 0:
-                continue
-
-            # pass white space
-            cur_char = comline[comline_cur-1]
-            while cur_char.isspace() and comline_cur>0:
-                comline_cur -= 1
-                cur_char = comline[comline_cur-1]
-
-            if comline_cur == 0:
-                continue
-
-            # pass letters
-            cur_char = comline[comline_cur-1]
-            while not cur_char.isspace() and comline_cur>0:
-                comline_cur -= 1
-                cur_char = comline[comline_cur-1]
+            comline.moveto_left_word()
 
         elif k == "KEY_LEFT":
-            comline_cur -= 1 if comline_cur>0 else 0
+            #comline_cur -= 1 if comline_cur>0 else 0
+            comline.moveto_left()
         elif k == "KEY_RIGHT":
-            comline_cur += 1 if comline_cur<len(comline) else 0
+            #comline_cur += 1 if comline_cur<len(comline) else 0
+            comline.moveto_right()
 
         # if printable
         elif k.isprintable():
-            comline = comline[:comline_cur] + k + comline[comline_cur:] # chr(k)
-            comline_cur+=1
+            #comline = comline[:comline_cur] + k + comline[comline_cur:] # chr(k)
+            #comline_cur+=1
+            comline.insert(k)
 
     #stdscr.addstr(cur_y, 0, 'Hello, curses!')
 
@@ -500,11 +542,7 @@ def main(stdscr):
     #cur_y += 1
     #stdscr.addstr(cur_y, 0, 'Hello, curses!')
 
-    cur.puts('Hello, curses!')
-    cur.puts('Hello, curses 2!')
-
     c = stdscr.getch()
-    cur.puts(f'c -> {chr(c)}')
 
     stdscr.getch()
     stdscr.erase()
@@ -519,7 +557,6 @@ def main(stdscr):
     #message = box.gather()
     #cur.puts(f'user message: {message}')
 
-    cur.commandline(cur.current_input_validator)
 
     # just pause it
     stdscr.getch()
