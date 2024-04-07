@@ -1,5 +1,7 @@
 """
+https://wasimlorgat.com/posts/editor
 https://hyperskill.org/blog/post/introduction-to-the-curses-library-in-python-text-based-interfaces
+https://stackoverflow.com/questions/18551558/how-to-use-terminal-color-palette-with-curses
 """
 
 import sys
@@ -33,6 +35,7 @@ from curses import wrapper
 from curses.textpad import Textbox, rectangle
 
 opts = 'klasd qwe pod 34 kjnd temp pre foo fuz toopoomoobooo'.split()
+selected_opts = set()
 
 def iteritems_recursive(d):
     for k,v in d.items():
@@ -389,12 +392,17 @@ def main(stdscr):
 
     curses.start_color()
     curses.use_default_colors()
-    highligh_color = 30
+
+    highligh_color = 30 # the blue-green use match color
     curses.init_pair(1, highligh_color, -1)
+
+    #select_grey_bkg = 253 # the light-grey
+    #curses.init_pair(2, select_grey_bkg, -1)
+
     styleMatchedText = curses.color_pair( 1 )
     #curses.init_pair(1,curses.COLOR_BLACK, curses.COLOR_CYAN)
     styleNormalText = curses.A_NORMAL
-    styleSelectLine = curses.A_BOLD
+    styleSelectLine = curses.A_BOLD | curses.A_REVERSE # | curses.color_pair(2)
 
     stdscr.clear()
 
@@ -419,18 +427,22 @@ def main(stdscr):
         # act on the user input as a set of substrings to find
         patterns = comline.split()
 
-        matched_opts = [[MatchString(o, False)] for o in opts]
         # seave through the substrings
         if patterns:
             matched_opts = []
-            for debug_line, opt in enumerate(opts):
+            for opt_num, opt in enumerate(opts):
                 prev_offset = 0
+
+                debug_line = opt_num
                 if DEBUG:
                     stdscr.addstr(20+debug_line, prev_offset, opt)
                     prev_offset += 3 + len(opt)
 
                 matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
-                if matches: matched_opts.append(matches)
+                if matches: matched_opts.append((opt_num, matches))
+
+        else:
+            matched_opts = [(i, [MatchString(o, False)]) for i, o in enumerate(opts)]
 
         if cur_select_cursor >= len(matched_opts):
             cur_select_cursor = len(matched_opts) - 1
@@ -440,23 +452,29 @@ def main(stdscr):
             cur_select_cursor = 0
 
         line_offset = 8
-        for cur_line, matched_o in enumerate(matched_opts):
+        for matched_o_num, (opt_num, matched_o) in enumerate(matched_opts):
             # split into substrings
-            if cur_line >= __max_y: # if it goes outside the screen
+            if matched_o_num >= __max_y: # if it goes outside the screen
                 break
 
-            if cur_line == cur_select_cursor:
-                line_opt = styleSelectLine
+            if matched_o_num == cur_select_cursor:
                 select_prompt = '> '
 
             else:
-                line_opt = styleNormalText
                 select_prompt = '  '
 
-            stdscr.addstr(line_offset+cur_line, 0, select_prompt)
+            if opt_num in selected_opts:
+                line_opt = styleSelectLine
+            else:
+                line_opt = styleNormalText
+
+            stdscr.addstr(line_offset+matched_o_num, 0, select_prompt)
             for substr in matched_o:
                 opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
                 stdscr.addstr(substr.content, opt)
+
+        for i, sel_opt_num in enumerate(selected_opts):
+            stdscr.addstr(20+i, 0, opts[sel_opt_num])
 
         stdscr.move(0, len(prompt) + comline.cur_pos)
 
@@ -521,6 +539,20 @@ def main(stdscr):
             if cur_select_cursor < len(matched_opts) - 1:
                 cur_select_cursor += 1
 
+        # capture ENTER to select and deselect options?
+        # ENTER is bad, because it is on the same side of keyboard
+        # as the arrow keys -- the same hand types everything
+        # there should be a large key button on the left hand!
+        #elif ord(k[0]) == 10 and len(matched_opts) > 0:
+
+        # ok, just use TAB to move to the action on the selected options
+        elif ord(k[0]) == 9 and len(matched_opts) > 0:
+            opt_num, _ = matched_opts[cur_select_cursor]
+            if opt_num in selected_opts:
+                selected_opts.discard(opt_num)
+            else:
+                selected_opts.add(opt_num)
+
         elif k == "KEY_END":
             #comline_cur = len(comline)
             comline.moveto_end()
@@ -535,6 +567,21 @@ def main(stdscr):
         elif k == "kRIT3": # alt-right
             pass
         elif k == "kLFT3": # alt-left
+            pass
+
+        elif k == "kUP3": # alt-up
+            pass
+        elif k == "kDN3": # alt-down
+            pass
+
+        elif k == "KEY_SRIGHT": # shift-right
+            pass
+        elif k == "KEY_SLEFT":  # shift-left
+            pass
+
+        elif k == "KEY_SF": # shift-down
+            pass
+        elif k == "KEY_SR": # shift-up
             pass
 
         elif k == "kRIT5": # ctrl-right
