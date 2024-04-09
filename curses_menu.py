@@ -384,7 +384,71 @@ class Comline:
             self.cur_pos -= 1
             cur_char = self.comline[self.cur_pos-1]
 
-def main(stdscr):
+    def edit_key(self, k):
+        if k in ("KEY_BACKSPACE", "\x7f"):
+            #if comline_cur>0:
+            #  comline = comline[:comline_cur-1] + comline[comline_cur:]
+            #  comline_cur-=1
+            self.backspace()
+
+        elif ord(k[0]) == KEY_CTRLW: # remove the last word
+            #res = comline_remove_last_word(comline_cur, comline)
+            #if not res:
+            #    continue
+            #comline, comline_cur = res
+            self.remove_last_word()
+
+        elif ord(k[0]) == 0: # the null character
+            pass
+
+        elif k == "KEY_END":
+            #comline_cur = len(self)
+            self.moveto_end()
+        elif k == "KEY_HOME":
+            #comline_cur = 0
+            self.moveto_home()
+
+        elif k == "kRIT3": # alt-right
+            pass
+        elif k == "kLFT3": # alt-left
+            pass
+
+        elif k == "KEY_SRIGHT": # shift-right
+            pass
+        elif k == "KEY_SLEFT":  # shift-left
+            pass
+
+        elif k == "KEY_SF": # shift-down
+            pass
+        elif k == "KEY_SR": # shift-up
+            pass
+
+        elif k == "kRIT5": # ctrl-right
+            self.moveto_right_word()
+
+        elif k == "kLFT5": # ctrl-left
+            self.moveto_left_word()
+
+        elif k == "KEY_LEFT":
+            #comline_cur -= 1 if comline_cur>0 else 0
+            self.moveto_left()
+        elif k == "KEY_RIGHT":
+            #comline_cur += 1 if comline_cur<len(self) else 0
+            self.moveto_right()
+
+        # if printable
+        elif k.isprintable():
+            #comline = comline[:comline_cur] + k + comline[comline_cur:] # chr(k)
+            #comline_cur+=1
+            self.insert(k)
+
+        else:
+            return False
+
+        # if one of known keys
+        return True
+
+def main(stdscr, action_menu=None):
     #global comline, comline_cur
     comline = Comline()
 
@@ -468,11 +532,13 @@ def main(stdscr):
             else:
                 line_opt = styleNormalText
 
+            # Print the matched options
             stdscr.addstr(line_offset+matched_o_num, 0, select_prompt)
             for substr in matched_o:
                 opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
                 stdscr.addstr(substr.content, opt)
 
+        # Print selected options (debugging?)
         for i, sel_opt_num in enumerate(selected_opts):
             stdscr.addstr(20+i, 0, opts[sel_opt_num])
 
@@ -513,24 +579,6 @@ def main(stdscr):
                 #comline, comline_cur = res
                 comline.remove_last_word()
 
-        elif k in ("KEY_BACKSPACE", "\x7f"):
-            #if comline_cur>0:
-            #  comline = comline[:comline_cur-1] + comline[comline_cur:]
-            #  comline_cur-=1
-
-            comline.backspace()
-            continue
-
-        elif ord(k[0]) == KEY_CTRLW: # remove the last word
-            #res = comline_remove_last_word(comline_cur, comline)
-            #if not res:
-            #    continue
-            #comline, comline_cur = res
-            comline.remove_last_word()
-
-        elif ord(k[0]) == 0: # the null character
-            pass
-
         # up-down control the selection among the matched options
         elif k == "KEY_UP":
             if cur_select_cursor > 0:
@@ -539,11 +587,26 @@ def main(stdscr):
             if cur_select_cursor < len(matched_opts) - 1:
                 cur_select_cursor += 1
 
+        elif k == "KEY_NPAGE": # page down
+            pass
+        elif k == "KEY_PPAGE": # page up
+            pass
+
+        elif k == "kUP3": # alt-up
+            pass
+        elif k == "kDN3": # alt-down
+            pass
+
         # capture ENTER to select and deselect options?
         # ENTER is bad, because it is on the same side of keyboard
         # as the arrow keys -- the same hand types everything
         # there should be a large key button on the left hand!
-        #elif ord(k[0]) == 10 and len(matched_opts) > 0:
+        elif ord(k[0]) == 10 and len(matched_opts) > 0 and action_menu is not None:
+            # launch the action menu
+            if selected_opts:
+                action_menu(stdscr, selected_opts)
+            else: # act on all matched
+                action_menu(stdscr, matched_opts)
 
         # ok, just use TAB to move to the action on the selected options
         elif ord(k[0]) == 9 and len(matched_opts) > 0:
@@ -553,55 +616,12 @@ def main(stdscr):
             else:
                 selected_opts.add(opt_num)
 
-        elif k == "KEY_END":
-            #comline_cur = len(comline)
-            comline.moveto_end()
-        elif k == "KEY_HOME":
-            #comline_cur = 0
-            comline.moveto_home()
-        elif k == "KEY_NPAGE": # page down
-            pass
-        elif k == "KEY_PPAGE": # page up
-            pass
-
-        elif k == "kRIT3": # alt-right
-            pass
-        elif k == "kLFT3": # alt-left
-            pass
-
-        elif k == "kUP3": # alt-up
-            pass
-        elif k == "kDN3": # alt-down
-            pass
-
-        elif k == "KEY_SRIGHT": # shift-right
-            pass
-        elif k == "KEY_SLEFT":  # shift-left
-            pass
-
-        elif k == "KEY_SF": # shift-down
-            pass
-        elif k == "KEY_SR": # shift-up
-            pass
-
-        elif k == "kRIT5": # ctrl-right
-            comline.moveto_right_word()
-
-        elif k == "kLFT5": # ctrl-left
-            comline.moveto_left_word()
-
-        elif k == "KEY_LEFT":
-            #comline_cur -= 1 if comline_cur>0 else 0
-            comline.moveto_left()
-        elif k == "KEY_RIGHT":
-            #comline_cur += 1 if comline_cur<len(comline) else 0
-            comline.moveto_right()
-
-        # if printable
-        elif k.isprintable():
-            #comline = comline[:comline_cur] + k + comline[comline_cur:] # chr(k)
-            #comline_cur+=1
-            comline.insert(k)
+        # comline edit has to be the last
+        # because of "printable" option:
+        # comline edit inserts this into the comline string
+        # but the above KEY_UP etc are also printable strings
+        elif comline.edit_key(k):
+            continue # if the comline knows how to processes this key
 
     #stdscr.addstr(cur_y, 0, 'Hello, curses!')
 
@@ -629,6 +649,26 @@ def main(stdscr):
     # just pause it
     stdscr.getch()
 
+def action_print(screen, action_polling, action_writing):
+    comline = Comline()
+
+    stdscr.clear()
+
+    prompt = "> "
+    k = " "
+    cur_select_cursor = 0
+    while True:
+        stdscr.erase()
+
+        stdscr.addstr(0, 0, f'{prompt}{comline}')
+        stdscr.addstr(1, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
+        stdscr.addstr(2, 0, 'just printing the selected options, and no action on ENTER')
+
+        stdscr.move(0, len(prompt) + comline.cur_pos)
+
+        k = stdscr.getkey()
+
+        stdscr.refresh()
 
 if __name__ == "__main__":
     from sys import argv
