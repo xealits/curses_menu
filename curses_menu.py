@@ -448,7 +448,8 @@ class Comline:
         # if one of known keys
         return True
 
-def main(stdscr, action_menu=None):
+def main(action_menu=None):
+  def curses_program(stdscr):
     #global comline, comline_cur
     comline = Comline()
 
@@ -544,8 +545,15 @@ def main(stdscr, action_menu=None):
 
         stdscr.move(0, len(prompt) + comline.cur_pos)
 
-        k = stdscr.getkey()
-        #k = stdscr.getch()
+        try:
+            k = stdscr.getkey() # get character or timeout
+
+        except curses.error as e:
+            # capture the timeout
+            if str(e) == "no input":
+                continue
+            else:
+                raise e
 
         #cur.puts(f'user char: {k} type {type(k)} and ==^[ {k=="^["}')
         #cur.puts(f'user char: {k[0]} type {type(k[0])} and ==^ {k=="^"}')
@@ -604,9 +612,11 @@ def main(stdscr, action_menu=None):
         elif ord(k[0]) == 10 and len(matched_opts) > 0 and action_menu is not None:
             # launch the action menu
             if selected_opts:
-                action_menu(stdscr, selected_opts)
+                action_menu(stdscr, [opts[i] for i in selected_opts])
+
             else: # act on all matched
-                action_menu(stdscr, matched_opts)
+                opt_to_act = [opts[i] for i, _ in matched_opts]
+                action_menu(stdscr, opt_to_act)
 
         # ok, just use TAB to move to the action on the selected options
         elif ord(k[0]) == 9 and len(matched_opts) > 0:
@@ -645,30 +655,100 @@ def main(stdscr, action_menu=None):
     #message = box.gather()
     #cur.puts(f'user message: {message}')
 
-
     # just pause it
     stdscr.getch()
 
-def action_print(screen, action_polling, action_writing):
+  return curses_program
+
+from time import time
+
+def menu_action(action_polling, action_writing):
+  def action(screen, options, timeout=1000):
     comline = Comline()
 
-    stdscr.clear()
+    screen.clear()
+    screen.timeout(timeout) # time to wait for character
 
     prompt = "> "
     k = " "
     cur_select_cursor = 0
+    action_writing_output = ""
     while True:
-        stdscr.erase()
+        screen.erase()
 
-        stdscr.addstr(0, 0, f'{prompt}{comline}')
-        stdscr.addstr(1, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
-        stdscr.addstr(2, 0, 'just printing the selected options, and no action on ENTER')
+        screen.addstr(0, 0, f'{prompt}{comline}')
+        screen.addstr(1, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
+        screen.addstr(2, 0, 'just printing the selected options, and no action on ENTER')
+        screen.addstr(3, 0, f'writing: {action_writing_output}')
+        screen.addstr(4, 0, f'{time()}')
 
-        stdscr.move(0, len(prompt) + comline.cur_pos)
+        screen.move(0, len(prompt) + comline.cur_pos)
 
-        k = stdscr.getkey()
+        action_polling(screen, options)
 
-        stdscr.refresh()
+        # draw the screen and getkey
+        screen.refresh()
+        try:
+            k = screen.getkey() # get character or timeout
+
+        except curses.error as e:
+            # capture the timeout
+            if str(e) == "no input":
+                k = '\0' # null character
+                continue
+            else:
+                raise e
+
+        # if ENTER - action_writing
+        # else: ESC to go back
+        #       or edit the comline
+
+        if ord(k[0]) == KEY_ESC:
+            # Don't wait for another key
+            # If it was Alt then curses has already sent the other key
+            # otherwise -1 is sent (Escape)
+            screen.nodelay(True)
+            n = screen.getch()
+
+            if n == -1:
+                # Escape was pressed
+                return # go back
+
+            # Return to delay
+            screen.nodelay(False)
+            # run something on alt-<n>
+            #cur.puts(f'user alt-char: {n}')
+
+            # else it's an ALT
+            if n == ord('w'):
+                #screen.addstr(50, 0, "alt-w !")
+                #res = comline_remove_last_word(comline_cur, comline)
+                #if not res:
+                #    continue
+                #comline, comline_cur = res
+                comline.remove_last_word()
+
+        # capture ENTER to select and deselect options?
+        # ENTER is bad, because it is on the same side of keyboard
+        # as the arrow keys -- the same hand types everything
+        # there should be a large key button on the left hand!
+        elif ord(k[0]) == 10:
+            # launch the write action
+            action_writing_output = action_writing(screen, options, str(comline))
+
+        elif comline.edit_key(k):
+            pass # if the comline knows how to processes this key
+
+
+  return action
+
+def action_view(screen, options):
+    line_offset = 20
+    for i, opt in enumerate(options):
+        screen.addstr(line_offset+i, 0, opt)
+
+def action_write(screen, options, comline_string):
+   return f'NOT doing anything with {comline_string}'
 
 if __name__ == "__main__":
     from sys import argv
@@ -696,5 +776,5 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         #opts = await _uals()
         opts = asyncio.run(_uals(parser))
 
-    wrapper(main)
+    wrapper(main(menu_action(action_view, action_write)))
 
