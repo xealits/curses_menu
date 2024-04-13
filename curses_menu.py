@@ -47,7 +47,10 @@ def iteritems_recursive(d):
 
 some_nested_structure = {'some':
         {'nested': 2, 'struct': {3: 'bar', 'baz': 5}},
-        'foo': 5,
+        'just': 5,
+        'Just': 5,
+        'foo': {'Bar': 77, 'bar': {'foo': 88}},
+        'Foo': {72: 'Bar', 'bar': {'baz': 88}},
         'more': {'nestings': 67, 5: 'five'},
         'and': 'only_string',
         'only_strings': {'foo': 'bar', 'baz': 'qwe'}
@@ -57,43 +60,6 @@ opts = []
 for p,v in iteritems_recursive(some_nested_structure):
     #print(f'{p} -> {v}')
     opts.append('.'.join([str(i) for i in p]) + '.' + str(v))
-
-class Curs:
-    def __init__(self, scr, init_x=0, init_y=0):
-        self.__scr = scr
-        self.__x = init_x
-        self.__y = init_y
-        self.__max_y, self.__max_x = scr.getmaxyx()
-
-    def puts(self, string, newline=True):
-        self.__scr.addstr(self.__y, self.__x, string)
-        if newline:
-            self.__y += 1
-        self.__scr.refresh()
-
-    def commandline(self, inp_processor=None, prompt="> "):
-        self.__scr.addstr(self.__y, self.__x, prompt)
-        editwin = curses.newwin(1, self.__max_x, self.__y, self.__x+len(prompt))
-        self.__scr.refresh()
-        box = Textbox(editwin)
-
-        if inp_processor:
-            validator = inp_processor(box)
-            box.edit(validator)
-        else:
-            box.edit()
-        message = box.gather()
-
-        self.__y += 1
-        self.puts(f'user message: {message}')
-        return message
-
-    def current_input_validator(self, box):
-        cur_inp = box.gather()
-        self.__y += 1
-        self.puts(f'cur input: {cur_inp}', newline=False)
-        self.__y -= 1
-        return lambda char: None
 
 from collections import namedtuple
 MatchString = namedtuple("MatchString", 'content ismatch')
@@ -107,16 +73,16 @@ def match_string_to_substr_selector(substr):
     # the string matcher works on the current reminder
     last_substr = cur_matches[-1].content
 
-    if substr not in last_substr:
+    if substr.upper() not in last_substr.upper():
         return None
 
-    if DEBUG:
-        stdscr.addstr(20+debug_line, prev_offset, last_substr)
-        prev_offset += 1 + len(last_substr)
+    ind = last_substr.upper().index(substr.upper())
+    pre, matched, post = last_substr[:ind], last_substr[ind:ind+len(substr)], last_substr[ind+len(substr):]
+    matches = cur_matches[:-1] + [MatchString(pre, False)] + [MatchString(matched, True)] + [MatchString(post, False)]
 
-    ind = last_substr.index(substr)
-    pre, post = last_substr[:ind], last_substr[ind+len(substr):]
-    matches = cur_matches[:-1] + [MatchString(pre, False)] + [MatchString(substr, True)] + [MatchString(post, False)]
+    if DEBUG:
+        stdscr.addstr(20+debug_line, prev_offset, f'{last_substr} - {ind} - {matches}')
+        prev_offset += 1 + len(last_substr)
 
     return matches
 
@@ -299,11 +265,14 @@ def _comline_remove_last_word(comline_cur, comline):
     return new_comline, comline_cur
 
 class Comline:
-    def __init__(self):
+    def __init__(self, prompt='> '):
         self.comline = ""
         self.cur_pos = 0
+        self.prompt  = prompt
+        self.cur_line = 0 # the line where the comline was printed the last time
+
     def __repr__(self):
-        return f'Comline()'
+        return f'Comline(prompt={self.prompt})'
     def __str__(self):
         return f'{self.comline}'
     def __len__(self):
@@ -314,6 +283,27 @@ class Comline:
         res = _comline_remove_last_word(self.cur_pos, self.comline)
         if res:
             self.comline, self.cur_pos = res
+
+    def set_cursor(self, stdscr):
+        #comline.set_cursor()
+        stdscr.move(self.cur_line, len(self.prompt) + self.cur_pos)
+
+    def print_to_scr(self, stdscr, cur_line, debug=False):
+        n_lines_printed = 0
+        stdscr.addstr(cur_line, 0, f'{self.prompt}{self.comline}')
+        self.cur_line = cur_line
+        n_lines_printed += 1
+
+        if debug:
+            #n_lines_printed += print_comline_info(stdscr, cur_line+1)
+            stdscr.addstr(cur_line+1, 0, ' '*(len(self.prompt) + self.cur_pos) + "^")
+            #stdscr.refresh()
+
+            stdscr.addstr(cur_line+2, 0, f'user cur: {self.cur_pos} {len(self.comline)}')
+
+            n_lines_printed += 2
+
+        return n_lines_printed
 
     def backspace(self):
         if self.cur_pos>0:
@@ -408,6 +398,7 @@ class Comline:
             #comline_cur = 0
             self.moveto_home()
 
+        # the keys that shouldn't affect the commandline
         elif k == "kRIT3": # alt-right
             pass
         elif k == "kLFT3": # alt-left
@@ -423,11 +414,27 @@ class Comline:
         elif k == "KEY_SR": # shift-up
             pass
 
+        elif k == "KEY_NPAGE": # page down
+            pass
+        elif k == "KEY_PPAGE": # page up
+            pass
+
+        elif k == "kUP3": # alt-up
+            pass
+        elif k == "kDN3": # alt-down
+            pass
+
         elif k == "kRIT5": # ctrl-right
             self.moveto_right_word()
 
         elif k == "kLFT5": # ctrl-left
             self.moveto_left_word()
+
+        # up-down control the selection among the matched options
+        elif k == "KEY_UP":
+            pass
+        elif k == "KEY_DOWN":
+            pass
 
         elif k == "KEY_LEFT":
             #comline_cur -= 1 if comline_cur>0 else 0
@@ -451,7 +458,7 @@ class Comline:
 def main(action_menu=None):
   def curses_program(stdscr):
     #global comline, comline_cur
-    comline = Comline()
+    comline = Comline(prompt='> ')
 
     __max_y, __max_x = stdscr.getmaxyx()
 
@@ -471,23 +478,28 @@ def main(action_menu=None):
 
     stdscr.clear()
 
-    prompt = "> "
     k = " "
     cur_select_cursor = 0
     while True:
         stdscr.erase()
 
-        stdscr.addstr(0, 0, f'{prompt}{comline}')
-        #stdscr.addstr(1, 0, comline)
-        stdscr.addstr(1, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
-        #stdscr.refresh()
+        cur_line = 0
+        # print the UI for the user
+        stdscr.addstr(cur_line, 0, f'UI info: ESC to exit, type to search & select, up-down-tab to cherry pick, ENTER to act on selection')
+        cur_line += 1
 
-        stdscr.addstr(4, 0, f'user cur: {comline.cur_pos} {len(comline)}')
-        if ord(k[0]) != 0:
-            stdscr.addstr(5, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+        # print the command line
+        cur_line += comline.print_to_scr(stdscr, cur_line, debug=DEBUG)
+        #stdscr.addstr(cur_line, 0, f'{prompt}{comline}')
+        #cur_line += 1
+        #if DEBUG: cur_line += print_comline_info(stdscr, cur_line)
 
-        else:
-            stdscr.addstr(5, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+        if DEBUG:
+            if ord(k[0]) != 0:
+                stdscr.addstr(cur_line, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            else:
+                stdscr.addstr(cur_line, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            cur_line += 1
 
         # act on the user input as a set of substrings to find
         patterns = comline.split()
@@ -499,11 +511,13 @@ def main(action_menu=None):
                 prev_offset = 0
 
                 debug_line = opt_num
+                matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
                 if DEBUG:
-                    stdscr.addstr(20+debug_line, prev_offset, opt)
+                    stdscr.addstr(cur_line+debug_line, prev_offset, opt)
                     prev_offset += 3 + len(opt)
 
-                matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
+                    #stdscr.addstr(cur_line+debug_line+20, prev_offset, f'{matches}')
+
                 if matches: matched_opts.append((opt_num, matches))
 
         else:
@@ -516,7 +530,7 @@ def main(action_menu=None):
         if cur_select_cursor < 0 and len(matched_opts) > 0:
             cur_select_cursor = 0
 
-        line_offset = 8
+        line_offset = cur_line
         for matched_o_num, (opt_num, matched_o) in enumerate(matched_opts):
             # split into substrings
             if matched_o_num >= __max_y: # if it goes outside the screen
@@ -541,9 +555,10 @@ def main(action_menu=None):
 
         # Print selected options (debugging?)
         for i, sel_opt_num in enumerate(selected_opts):
-            stdscr.addstr(20+i, 0, opts[sel_opt_num])
+            stdscr.addstr(cur_line+i, 0, opts[sel_opt_num])
 
-        stdscr.move(0, len(prompt) + comline.cur_pos)
+        comline.set_cursor(stdscr)
+        #stdscr.move(0, len(prompt) + comline.cur_pos)
 
         try:
             k = stdscr.getkey() # get character or timeout
@@ -594,16 +609,6 @@ def main(action_menu=None):
         elif k == "KEY_DOWN":
             if cur_select_cursor < len(matched_opts) - 1:
                 cur_select_cursor += 1
-
-        elif k == "KEY_NPAGE": # page down
-            pass
-        elif k == "KEY_PPAGE": # page up
-            pass
-
-        elif k == "kUP3": # alt-up
-            pass
-        elif k == "kDN3": # alt-down
-            pass
 
         # capture ENTER to select and deselect options?
         # ENTER is bad, because it is on the same side of keyboard
@@ -676,13 +681,16 @@ def menu_action(action_polling, action_writing):
     while True:
         screen.erase()
 
-        screen.addstr(0, 0, f'{prompt}{comline}')
-        screen.addstr(1, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
-        screen.addstr(2, 0, 'just printing the selected options, and no action on ENTER')
-        screen.addstr(3, 0, f'writing: {action_writing_output}')
-        screen.addstr(4, 0, f'{time()}')
+        screen.addstr(0, 0, f'UI info: ESC to go back, type and ENTER to write to all selected options, it reads every {timeout}ms')
+        #screen.addstr(0, 0, f'{prompt}{comline}')
+        comline.print_to_scr(screen, 1, debug=DEBUG)
+        screen.addstr(2, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
+        screen.addstr(3, 0, 'just printing the selected options, and no action on ENTER')
+        screen.addstr(4, 0, f'writing: {action_writing_output}')
+        screen.addstr(5, 0, f'{time()}')
 
-        screen.move(0, len(prompt) + comline.cur_pos)
+        #screen.move(0, len(prompt) + comline.cur_pos)
+        comline.set_cursor(screen)
 
         action_polling(screen, options)
 
@@ -739,11 +747,9 @@ def menu_action(action_polling, action_writing):
         elif comline.edit_key(k):
             pass # if the comline knows how to processes this key
 
-
   return action
 
-def action_view(screen, options):
-    line_offset = 20
+def action_view(screen, options, line_offset=20):
     for i, opt in enumerate(options):
         screen.addstr(line_offset+i, 0, opt)
 
