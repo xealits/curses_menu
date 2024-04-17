@@ -34,8 +34,130 @@ import curses
 from curses import wrapper
 from curses.textpad import Textbox, rectangle
 
-opts = 'klasd qwe pod 34 kjnd temp pre foo fuz toopoomoobooo'.split()
 selected_opts = set()
+
+'''
+I aim at the Quasar OPC Design.xml
+it is very simple:
+    <tag_of_class_variable has_state=V> <and_chidren_tags...> </tag>
+    <tag_class> <is a device, it contains other tags and has no state> </tag>
+
+Probably, it would be good to just deal with an XML/HTML object?
+But it must be done without an external library, like beautifulsoup.
+Such a simple structure can be done in JSON too.
+If needed, it can be extended to some TOML, if needed.
+
+Let's focus this on working with structured nested data, XML.
+Not any plain test like grep.
+The problem is, the option should be given with full-path,
+not just the current tag.
+
+Let's do it slowly. First, a simple dict.
+
+It unfolds into simple:
+    [list, of, strings, with, DP, names]: value
+Or no value in some cases. I want to search by names, but also by values.
+
+... it is also true that variables do not have children tags here...
+We have a very simple tree where branches are devices with no state,
+and leaves are variables with state and no nested children.
+So, it is exactly like the recursive iteration function for dictionaries.
+
+I need a selector for sibling value. I.e. to select DP Enable
+who has a sibling whose value is "PPB1A", i.e. that's the connectivity nickname.
+
+Do I need to invert the selection algorithm?
+I.e. now each pattern filters the list of options. I.e. the patterns act on
+individual options, independently from the other ones. But it should be inverted,
+where the whole line of patterns is matched to each option.
+This way we'll get the search relative to siblings and parent node.
+'''
+
+xml_options = '''<?xml version="1.0"?>
+<data>
+    <country name="Liechtenstein">
+        <rank>1</rank>
+        <year>2008</year>
+        <gdppc>141100</gdppc>
+        <neighbor name="Austria" direction="E"/>
+        <neighbor name="Switzerland" direction="W"/>
+    </country>
+    <country name="Singapore">
+        <rank>4</rank>
+        <year>2011</year>
+        <gdppc>59900</gdppc>
+        <neighbor name="Malaysia" direction="N"/>
+    </country>
+    <country name="Panama">
+        <rank>68</rank>
+        <year>2011</year>
+        <gdppc>13600</gdppc>
+        <neighbor name="Costa Rica" direction="W"/>
+        <neighbor name="Colombia" direction="E"/>
+    </country>
+    <nested value="2" type="int"></nested>
+    <struct>
+        <bar value="3"></bar>
+        <baz value="5"></baz>
+    </struct>
+    <just value="5"></just>
+    <Just value="5"></Just>
+    <foo>
+        <Bar value="77"></Bar>
+        <bar>
+        </bar>
+    </foo>
+</data>
+'''
+
+from collections import namedtuple
+MatchString = namedtuple('MatchString', 'content ismatch')
+_DataPoint  = namedtuple('DataPoint', 'path value', defaults=(None, None))
+class DataPoint(_DataPoint):
+    def __str__(self):
+        return f'{self.path}={self.value}'
+
+OptionPath = namedtuple('OptionPath', 'path options')
+# path is a list of match strings
+# options is a dictionary
+
+'''
+make a matched string to highlight in curses
+'''
+class MatchStringL:
+    def __init__(self, arg):
+        if   isinstance(arg, str):
+            self.match_strings = [MatchString(arg, False)]
+        elif isinstance(arg, list):
+            self.match_strings = []
+            for s in arg:
+                self.match_strings.append(s if isinstance(s, MatchString) else MatchString(str(s), False))
+        else:
+            raise TypeError("arg must be None or str or list of MatchString")
+
+    def __str__(self):
+        return ''.join(str(s.content) for s in self.match_strings)
+
+    def __repr__(self):
+        return f'MatchStringL("{self}")'
+
+    def __add__(self, other):
+        assert isinstance(other, MatchStringL)
+        return MatchStringL(self.match_strings + other.match_strings)
+
+    # def print_to_curses(self, stdscr, line_num, char_pos, line_option, styleMatchedText, styleNormalText):
+    def print_to_curses(self, stdscr, line_option, styleMatchedText, styleNormalText, coord=None):
+        # Print the matched options
+        #stdscr.addstr(line_num, char_pos, select_prompt)
+        if coord is not None:
+            line_num, char_pos = coord
+            stdscr.move(line_num, char_pos)
+
+        for substr in self.match_strings:
+            opt = line_option | (styleMatchedText if substr.ismatch else styleNormalText)
+            stdscr.addstr(substr.content, opt)
+
+opts = 'klasd qwe pod 34 kjnd temp pre foo fuz toopoomoobooo'.split()
 
 def iteritems_recursive(d):
     for k,v in d.items():
@@ -46,25 +168,65 @@ def iteritems_recursive(d):
         yield (k,),v
 
 some_nested_structure = {'some':
-        {'nested': 2, 'struct': {3: 'bar', 'baz': 5}},
+        {'nested': 2, 'struct': {'bar': 3, 'baz': 5}},
         'just': 5,
         'Just': 5,
         'foo': {'Bar': 77, 'bar': {'foo': 88}},
         'Foo': {72: 'Bar', 'bar': {'baz': 88}},
+        'and_cases': {'foo': {'bar': 88}, 'baz': {'Bar': 55}},
         'more': {'nestings': 67, 5: 'five'},
         'and': 'only_string',
         'only_strings': {'foo': 'bar', 'baz': 'qwe'}
         }
 
 opts = []
-for p,v in iteritems_recursive(some_nested_structure):
+for p, v in iteritems_recursive(some_nested_structure):
     #print(f'{p} -> {v}')
-    opts.append('.'.join([str(i) for i in p]) + '.' + str(v))
+    #opts.append('.'.join([str(i) for i in p]) + '=' + str(v))
+    opts.append(DataPoint('.'.join([str(i) for i in p]), v))
 
-from collections import namedtuple
-MatchString = namedtuple("MatchString", 'content ismatch')
+opts = [OptionPath([], some_nested_structure)]
 
-DEBUG=False
+def flatten_opt_paths(opt_paths):
+    flat_opts = []
+    for path, opts in opt_paths:
+        for p, v in iteritems_recursive(opts):
+            flat_opts.append((path + list(p), v))
+
+    return flat_opts
+
+'''
+OptionTagRaw = namedtuple('OptionTag', 'name value type', defaults=('tag', None, None))
+class OptionTag(OptionTagRaw):
+    def __str__(self):
+        return str(self.name)
+OT = OptionTag
+
+some_nested_tags = {OptionTag('some'):
+        {OptionTag('nested'): OT(2),
+         OptionTag('struct', 3): {OptionTag('baz'): OT(5)}},
+        OptionTag('just'): OT(5),
+        OptionTag('Just'): OT(5),
+        OptionTag('Sys'): {OT('stave'): {OT('Connectivity', 'PPB1A'): None, OT('Enabled', 'False'): None, 'bus': {'AMAC': 5}}},
+        OptionTag('foo'): {OT('Bar'): OT(77), OT('bar'): {'foo': 88}},
+        OptionTag('Foo'): {72: 'Bar', 'bar': {'baz': 88}},
+        OptionTag('more'): {'nestings': 67, 5: 'five'},
+        OptionTag('and'): 'only_string',
+        OptionTag('only_strings'): {'foo': 'bar', 'baz': 'qwe'}
+        }
+
+opts = []
+for p,v in iteritems_recursive(some_nested_tags):
+    #print(f'{p} -> {v}')
+    opt_str = '.'.join([str(i) for i in p])
+    if v is not None:
+        opt_str += '.' + str(v)
+    if isinstance(v, OptionTag) and v.value is not None:
+        opt_str += '=' + str(v.value)
+    opts.append(opt_str)
+'''
+
+DEBUG = True
 
 FIELD_SEPARATOR='.'
 
@@ -195,6 +357,54 @@ def match_string_field_child(child_substr: str):
 
     return selector
 
+def match_string_field_sibling_value(value: str):
+    def selector(cur_matches: list, stdscr, prev_offset, debug_line) -> list:
+        # check if the siblings contain a field with the value
+        # ...
+        # it needs the whole tree of options
+        last_substr = cur_matches[-1].content
+
+        cutoff = None
+        if len(cur_matches)>1 and cur_matches[-2].content[-1] == FIELD_SEPARATOR:
+            # the child field starts from the start of the last_substr
+            fields = last_substr.split(FIELD_SEPARATOR)
+
+        elif FIELD_SEPARATOR not in last_substr:
+            # i.e. the case when the matching cursor sits
+            # in the middle of the last field
+            # -- no child fields at this point
+            return None
+
+        else:
+            cutoff, *fields = last_substr.split(FIELD_SEPARATOR)
+
+        child_field = fields[0]
+
+        if DEBUG:
+            #prev_offset += 1 + len(last_substr)
+            stdscr.addstr(20+debug_line, prev_offset, f'None: {last_substr} -> {cutoff} {fields} | {child_field}')
+            #prev_offset += 5 + len('None')
+
+        if child_substr not in child_field:
+            return None
+
+        # make the list of matches
+        ind = child_field.index(child_substr)
+        pre, post = child_field[:ind], child_field[ind+len(child_substr):]
+
+        # add the cutoff to pre, if needed
+        if cutoff is not None:
+            pre = cutoff + '.' + pre
+
+        post = '.'.join([post] + fields[1:])
+
+        matches = cur_matches[:-1] + [MatchString(pre, False)] + [MatchString(child_substr, True)] + [MatchString(post, False)]
+
+        return matches
+
+    return selector
+
+
 def dispatch_selectors(selector_string: str):
 
     if selector_string[0] == '.':
@@ -238,6 +448,176 @@ def match_string_to_selectors(string: str, subs_list: list, stdscr, debug_line, 
     #    return None
 
     return matches
+
+'''
+what it must return is
+[
+([list of keys leading to] {currently parsed options})
+]
+the list of keys can be made of MatchStrings
+but it's better to encapsulate the [MatchString]-list pattern
+'''
+def match_child_data(lambda_for_key_val, opts: dict) -> list:
+    #print(f'{opts} ->')
+
+    if not isinstance(opts, dict):
+        # no "child" to match anything
+        return []
+
+    # the current options match
+    if any(lambda_for_key_val(name, val) for name, val in opts.items()):
+        return [OptionPath([], opts)]
+
+    # if not in the current level -- nest
+    matched_opt_paths = []
+    for k, val in opts.items():
+        if isinstance(val, dict):
+            deep_match_paths = match_child_data(lambda_for_key_val, val)
+            for deep_match in deep_match_paths:
+                opt_path = [k] + deep_match.path
+                matched_opt_paths.append(OptionPath(opt_path, deep_match.options))
+
+    #print(f'{opts} -> {matched_opt_paths}')
+    return matched_opt_paths
+
+def match_child_name(substr: str, opts: dict) -> list:
+    return match_child_data(lambda name, v: substr in str(name), opts)
+
+def match_child_val(substr: str, opts: dict) -> list:
+    return match_child_data(lambda n, val: substr in str(val), opts)
+
+def match_substr(substr: str, opts: dict) -> list:
+    if not isinstance(opts, dict):
+        return []
+
+    matched_paths = []
+    for k, v in opts.items():
+        name = str(k)
+
+        if substr in name:
+            # a match!
+            ind = name.find(substr)
+            pre = name[:ind]
+            pos = name[ind+len(substr):]
+            mstring = MatchStringL([MatchString(pre, False), MatchString(substr, True), MatchString(pos, False)])
+
+            # narrowed the path nesting
+            matched_paths.append(OptionPath([mstring], v))
+            #next_matched_opts.append(OptionPath(next_opt_paths, v))
+
+        elif isinstance(v, dict):
+            for deep_path, remaining_opts in match_substr(substr, v):
+                matched_paths.append(OptionPath([name] + deep_path, remaining_opts))
+
+    return matched_paths
+
+
+def match_options_to_selectors(opt_paths: list, patterns: list, stdscr) -> list:
+    '''match_options_to_selectors(opt_paths: list(OptionPath), patterns: list, stdscr) -> list
+
+    Now opts is a nested dictionary. It is a DataPoints structure:
+    the leafs of the tree are the values of DP variables.
+    The matching to patterns goes recursively, to test each full DP name.
+    Patterns can be either any string that is matched to a DP name,
+    or they begin with `.` then the DP value is matched to type,
+    or `>` then the child of DP is matched and the search continues from parent,
+    or `=` then the child value is matched and the search continues from parent.
+
+    Ok, the meaning of `>` is different now? It matches the child name
+    but keeps the search in the current DP node.
+    Previously, it looked for the child name under the last matched DP node.
+    Now these 3 operators act the same relative way.
+    '''
+
+    # if the patterns are exhausted, convert the search into a flat list of match strings?
+    if not patterns:
+        flat_opts = []
+        for path, opts in opt_paths:
+            if not isinstance(opts, dict):
+                # TODO: just return a list of match strings and convert it to full strings when needed
+                #mstring = MatchString('.'.join(path + [str(i) for i in p]) + '=' + str(opts), False)
+                flat_option = path, MatchStringL(f'{opts}')
+                flat_opts.append(flat_option)
+                continue
+
+            for p, v in iteritems_recursive(opts):
+              #flat_opts.append(DataPoint('.'.join([str(i) for i in p]), v))
+              # I cannot return just DataPoint!
+              # I need to return MatchString
+              #mstring = MatchString('.'.join(path + [str(i) for i in p]) + '=' + str(v), False)
+              #flat_opts.append(mstring)
+              #print(path, p, v)
+              #flat_option = path + [i if isinstance(i, MatchStringL) else MatchStringL(i) for i in p] + [MatchStringL(f'={v}')]
+              flat_option = (path + [i if isinstance(i, MatchStringL) else MatchStringL(str(i)) for i in p], MatchStringL(f'{v}'))
+              flat_opts.append(flat_option)
+
+        return flat_opts
+
+    # no options left, but patterns are still there
+    if not opt_paths: return []
+
+    # the current pattern to match
+    pm = patterns[0]
+    assert len(pm)>0
+
+    # TODO: not clear how to return match strings for child/sibling matches
+    #       i.e. what goes to the action manu then?
+    if pm[0] in ('>', '='):
+        if len(pm)==1:
+            # incomplete pattern definition - skip it
+            return match_options_to_selectors(opt_paths, patterns[1:], stdscr)
+
+        # search for a child with name match
+        tomatch = pm[0][1:]
+        #mstring, matched_opts = match_child_name(tomatch, opts)
+
+        next_opt_paths = []
+        for path, opts in opt_paths:
+            if   pm[0] == '>':
+                matched_opts = match_child_name(tomatch, opts)
+            elif pm[0] == '=':
+                matched_opts = match_child_val(tomatch, opts)
+
+            for op in matched_opts:
+                next_opt_paths.append(OptionPath([path] + op.path, op.options))
+
+        # launch the rest of search
+        return match_options_to_selectors(next_opt_paths, patterns[1:], stdscr)
+
+    #elif pm[0] == '.':
+    #    # search for child with _value_ of the given type
+    #    mstring, matched_opts = match_type(pm[1:], opts)
+    #    rest = match_options_to_selectors(matched_opts, patterns[1:], stdscr)
+    #    yield [mstring + r for r in rest]
+
+    #elif pm[0] == '=':
+
+    else: # search fields names
+        next_matched_opts = []
+        for path, op_tree in opt_paths:
+            if not isinstance(op_tree, dict):
+                # no name to match
+                continue
+
+            for deep_path, remaining_opt in match_substr(pm, op_tree):
+                next_matched_opts.append(OptionPath(path+deep_path, remaining_opt))
+
+        return match_options_to_selectors(next_matched_opts, patterns[1:], stdscr)
+
+#    for k, v in opts.items():
+#        if isinstance(v, dict):
+#          for k1,v1 in iteritems_recursive(v):
+#            yield (k,)+k1, v1
+#        else:
+#          yield (k,),v
+
+#def iteritems_recursive(d):
+#    for k,v in d.items():
+#      if isinstance(v, dict):
+#        for k1,v1 in iteritems_recursive(v):
+#          yield (k,)+k1, v1
+#      else:
+#        yield (k,),v
 
 def _comline_remove_last_word(comline_cur, comline):
     # damn
@@ -506,22 +886,32 @@ def main(action_menu=None):
 
         # seave through the substrings
         if patterns:
-            matched_opts = []
-            for opt_num, opt in enumerate(opts):
-                prev_offset = 0
+            #matched_opts = match_options_to_selectors(opts, patterns, stdscr)
+            matched_opt_paths = match_options_to_selectors(opts, patterns, stdscr)
+            #import pdb
+            #pdb.set_trace()
+            #matched_opts = flatten_opt_paths(matched_opt_paths)
+            matched_opts = matched_opt_paths
 
-                debug_line = opt_num
-                matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
-                if DEBUG:
-                    stdscr.addstr(cur_line+debug_line, prev_offset, opt)
-                    prev_offset += 3 + len(opt)
+            if DEBUG:
+                 stdscr.addstr(cur_line+20, 0, f'matched opts {len(matched_opts)}')
 
-                    #stdscr.addstr(cur_line+debug_line+20, prev_offset, f'{matches}')
+            #for opt_num, (opt, val) in enumerate(opts):
+            #    prev_offset = 0
 
-                if matches: matched_opts.append((opt_num, matches))
+            #    debug_line = opt_num
+            #    matches = match_string_to_selectors(opt, patterns, stdscr, debug_line, prev_offset)
+            #    if DEBUG:
+            #        stdscr.addstr(cur_line+debug_line, prev_offset, opt)
+            #        prev_offset += 3 + len(opt)
+
+            #        #stdscr.addstr(cur_line+debug_line+20, prev_offset, f'{matches}')
+
+            #    if matches: matched_opts.append((opt_num, matches))
 
         else:
-            matched_opts = [(i, [MatchString(o, False)]) for i, o in enumerate(opts)]
+            #matched_opts = [(i, [MatchString(o, False)]) for i, (o, v) in enumerate(opts)]
+            matched_opts = flatten_opt_paths(opts)
 
         if cur_select_cursor >= len(matched_opts):
             cur_select_cursor = len(matched_opts) - 1
@@ -531,7 +921,8 @@ def main(action_menu=None):
             cur_select_cursor = 0
 
         line_offset = cur_line
-        for matched_o_num, (opt_num, matched_o) in enumerate(matched_opts):
+        #for matched_o_num, (opt_num, matched_o) in enumerate(matched_opts):
+        for matched_o_num, (matched_o, val) in enumerate(matched_opts):
             # split into substrings
             if matched_o_num >= __max_y: # if it goes outside the screen
                 break
@@ -542,16 +933,26 @@ def main(action_menu=None):
             else:
                 select_prompt = '  '
 
-            if opt_num in selected_opts:
-                line_opt = styleSelectLine
-            else:
-                line_opt = styleNormalText
+            line_opt = styleNormalText
+            #if opt_num in selected_opts:
+            #    line_opt = styleSelectLine
 
             # Print the matched options
             stdscr.addstr(line_offset+matched_o_num, 0, select_prompt)
-            for substr in matched_o:
-                opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
-                stdscr.addstr(substr.content, opt)
+            for i, substr in enumerate(matched_o):
+                if i != 0:
+                    stdscr.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
+
+                if not isinstance(substr, MatchStringL):
+                    stdscr.addstr(str(substr), line_opt | styleNormalText)
+
+                else:
+                    #opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
+                    #stdscr.addstr(substr.content, opt)
+                    # def print_to_curses(self, stdscr, line_option, styleMatchedText, styleNormalText, coord=None):
+                    substr.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
+
+            stdscr.addstr(f'={val}', line_opt | styleNormalText)
 
         # Print selected options (debugging?)
         for i, sel_opt_num in enumerate(selected_opts):
@@ -751,7 +1152,7 @@ def menu_action(action_polling, action_writing):
 
 def action_view(screen, options, line_offset=20):
     for i, opt in enumerate(options):
-        screen.addstr(line_offset+i, 0, opt)
+        screen.addstr(line_offset+i, 0, str(opt))
 
 def action_write(screen, options, comline_string):
    return f'NOT doing anything with {comline_string}'
