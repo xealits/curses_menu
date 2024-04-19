@@ -167,7 +167,11 @@ some_nested_structure = {'some':
         {'nested': 2, 'struct': {'bar': 3, 'baz': 5}},
         'just': 5,
         'Just': 5,
-        'foo': {'Bar': 77, 'bar': {'foo': 88, 'ccc': {'qwe': 5, 'enable': True, 'bar': 18}, 'baz': 'work'}},
+        'foo': {
+            'Bar': 77,
+            'bar': {'foo': 88, 'ccc': {'qwe': 5, 'enable': True, 'bar': 18}, 'baz': 'work'},
+            'qwe': {'ccc': {'qwe': 5, 'enable': True, 'bar': 18}, 'baz': 'work'},
+            },
         'Foo': {72: 'Bar', 'bar': {'baz': 88}},
         'and_cases': {'foo': {'bar': 88}, 'baz': {'Bar': 55}},
         'more': {'nestings': 67, 5: 'five'},
