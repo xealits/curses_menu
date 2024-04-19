@@ -171,7 +171,7 @@ some_nested_structure = {'some':
         {'nested': 2, 'struct': {'bar': 3, 'baz': 5}},
         'just': 5,
         'Just': 5,
-        'foo': {'Bar': 77, 'bar': {'foo': 88}},
+        'foo': {'Bar': 77, 'bar': {'foo': 88, 'ccc': {'qwe': 5, 'enable': True, 'bar': 18}, 'baz': 'work'}},
         'Foo': {72: 'Bar', 'bar': {'baz': 88}},
         'and_cases': {'foo': {'bar': 88}, 'baz': {'Bar': 55}},
         'more': {'nestings': 67, 5: 'five'},
@@ -466,6 +466,7 @@ def match_child_data(lambda_for_key_val, opts: dict) -> list:
 
     # the current options match
     if any(lambda_for_key_val(name, val) for name, val in opts.items()):
+        #return [OptionPath(['DEBUG'], opts)]
         return [OptionPath([], opts)]
 
     # if not in the current level -- nest
@@ -487,6 +488,11 @@ def match_child_val(substr: str, opts: dict) -> list:
     return match_child_data(lambda n, val: substr in str(val), opts)
 
 def match_substr(substr: str, opts: dict) -> list:
+    '''match_substr(substr: str, opts: dict) -> list
+
+    return [OptionPath]
+    '''
+
     if not isinstance(opts, dict):
         return []
 
@@ -494,12 +500,14 @@ def match_substr(substr: str, opts: dict) -> list:
     for k, v in opts.items():
         name = str(k)
 
-        if substr in name:
+        # match case-insensitive
+        if substr.upper() in name.upper():
             # a match!
-            ind = name.find(substr)
+            ind = name.upper().find(substr.upper())
             pre = name[:ind]
+            mch = name[ind:ind+len(substr)]
             pos = name[ind+len(substr):]
-            mstring = MatchStringL([MatchString(pre, False), MatchString(substr, True), MatchString(pos, False)])
+            mstring = MatchStringL([MatchString(pre, False), MatchString(mch, True), MatchString(pos, False)])
 
             # narrowed the path nesting
             matched_paths.append(OptionPath([mstring], v))
@@ -568,10 +576,10 @@ def match_options_to_selectors(opt_paths: list, patterns: list, stdscr) -> list:
             return match_options_to_selectors(opt_paths, patterns[1:], stdscr)
 
         # search for a child with name match
-        tomatch = pm[0][1:]
+        tomatch = pm[1:]
         #mstring, matched_opts = match_child_name(tomatch, opts)
 
-        next_opt_paths = []
+        next_opt_paths = [] #[OptionPath([tomatch], opt_paths[0].options)]
         for path, opts in opt_paths:
             if   pm[0] == '>':
                 matched_opts = match_child_name(tomatch, opts)
@@ -579,7 +587,7 @@ def match_options_to_selectors(opt_paths: list, patterns: list, stdscr) -> list:
                 matched_opts = match_child_val(tomatch, opts)
 
             for op in matched_opts:
-                next_opt_paths.append(OptionPath([path] + op.path, op.options))
+                next_opt_paths.append(OptionPath(path + op.path, op.options))
 
         # launch the rest of search
         return match_options_to_selectors(next_opt_paths, patterns[1:], stdscr)
