@@ -6,6 +6,7 @@ https://stackoverflow.com/questions/18551558/how-to-use-terminal-color-palette-w
 
 import sys
 import re
+from copy import deepcopy
 
 import os
 os.environ.setdefault('ESCDELAY', '25')
@@ -125,26 +126,22 @@ OptionPath = namedtuple('OptionPath', 'path options')
 make a matched string to highlight in curses
 '''
 class MatchStringL:
-    def __init__(self, arg):
+    def __init__(self, arg, default_match=False):
         if   isinstance(arg, str):
-            self.match_strings = [MatchString(arg, False)]
+            self.match_strings = [MatchString(arg, default_match)]
         elif isinstance(arg, list):
             self.match_strings = []
             for s in arg:
-                self.match_strings.append(s if isinstance(s, MatchString) else MatchString(str(s), False))
+                self.match_strings.append(s if isinstance(s, MatchString) else MatchString(str(s), default_match))
         else:
-            raise TypeError("arg must be None or str or list of MatchString")
-
+            raise TypeError(f"arg must be str or list of MatchString, it is {type(arg)}")
     def __str__(self):
-        return ''.join(str(s.content) for s in self.match_strings)
-
+        return ''.join(f'{s.content}' for s in self.match_strings)
     def __repr__(self):
         return f'MatchStringL("{self}")'
-
     def __add__(self, other):
         assert isinstance(other, MatchStringL)
         return MatchStringL(self.match_strings + other.match_strings)
-
     # def print_to_curses(self, stdscr, line_num, char_pos, line_option, styleMatchedText, styleNormalText):
     def print_to_curses(self, stdscr, line_option, styleMatchedText, styleNormalText, coord=None):
         # Print the matched options
@@ -152,7 +149,6 @@ class MatchStringL:
         if coord is not None:
             line_num, char_pos = coord
             stdscr.move(line_num, char_pos)
-
         for substr in self.match_strings:
             opt = line_option | (styleMatchedText if substr.ismatch else styleNormalText)
             stdscr.addstr(substr.content, opt)
@@ -176,7 +172,9 @@ some_nested_structure = {'some':
         'and_cases': {'foo': {'bar': 88}, 'baz': {'Bar': 55}},
         'more': {'nestings': 67, 5: 'five'},
         'and': 'only_string',
-        'only_strings': {'foo': 'bar', 'baz': 'qwe', 'plus': {'and': 'five', 'more': 'less'}},
+        'only_strings': {'foo': 'bar', 'baz': 'qwe',
+            'plus': {'and': 'five', 'more': 'less'},
+            'Connectivity': 'PPB1A'},
         }
 
 opts = []
@@ -457,24 +455,40 @@ what it must return is
 the list of keys can be made of MatchStrings
 but it's better to encapsulate the [MatchString]-list pattern
 '''
-def match_child_data(lambda_for_key_val, opts: dict) -> list:
+def match_child_data(substr, lambda_for_key_val, opts: dict, accum_res: list) -> list:
     #print(f'{opts} ->')
 
     if not isinstance(opts, dict):
         # no "child" to match anything
-        return []
+        return accum_res
 
     # the current options match
-    if any(lambda_for_key_val(name, val) for name, val in opts.items()):
+    #if any(lambda_for_key_val(name, val) for name, val in opts.items()):
+    #a_match = next(((name, val) for name, val in opts.items() if lambda_for_key_val(name, val)), None)
+    a_match = lambda_for_key_val(substr, opts)
+    if a_match is not None:
         #return [OptionPath([str(opts.items())], opts)]
         #return [OptionPath(['DEBUG'], opts)]
-        return [OptionPath([], opts)]
+        # TODO: highlight the matched option?
+        name, val = a_match
+        # substitute this in opts... it will mutate the dictionary inplace...
+        ret_opts = {} # make deep copy, preserve the order of opt, insert
+        for k, v in opts.items():
+            if k == str(name): # or str(v) == str(val):
+                # insert the matched string with the match result
+                # i.e. it turns the original opts content into MatchStringL
+                ret_opts[name] = val
+            else:
+                #ret_opts[str(k) + f'{type(name)}-{type(val)}'] = v
+                ret_opts[k] = v
+        #return accum_res + [OptionPath([f'|{k} {name} {k == str(name)}|'], ret_opts)]
+        return accum_res + [OptionPath([], ret_opts)]
 
     # if not in the current level -- nest
     matched_opt_paths = []
     for k, val in opts.items():
         if isinstance(val, dict):
-            deep_match_paths = match_child_data(lambda_for_key_val, val)
+            deep_match_paths = match_child_data(substr, lambda_for_key_val, val, accum_res)
             for deep_match in deep_match_paths:
                 opt_path = [k] + deep_match.path
                 matched_opt_paths.append(OptionPath(opt_path, deep_match.options))
@@ -482,14 +496,34 @@ def match_child_data(lambda_for_key_val, opts: dict) -> list:
     #print(f'{opts} -> {matched_opt_paths}')
     return matched_opt_paths
 
-def match_child_name(substr: str, opts: dict) -> list:
-    # should I test whether "name" is str or int?
-    # the user can supply a dict or list or set in there
-    return match_child_data(lambda name, v: substr in str(name), opts)
+def match_opt_names(substr, opts):
+    # i.e. None cannot be in the keys!
+    a_match = next((name for name in opts.keys() if substr in str(name)), None)
+    if a_match is None:
+        return None
+    return MatchStringL(a_match, True), opts[a_match]
 
-def match_child_val(substr: str, opts: dict) -> list:
-    # the "value" is only the leave of this dict-based tree
-    return match_child_data(lambda n, val: False if isinstance(val, dict) else substr in str(val), opts)
+def match_only_leafs(substr, node_value):
+    return not isinstance(node_value, dict) and substr in str(node_value)
+
+def match_opt_values(substr, opts):
+    a_match = next(((key, val) for key, val in opts.items() if match_only_leafs(substr, val)), None)
+    if a_match is None:
+        return None
+    key, match_val = a_match
+    # return the whole new pair, with the match highlighted
+    #ret = key, MatchStringL(str(match_val) + 'HEY', True)
+    ret = key, MatchStringL(str(match_val), True)
+    return ret
+    #return key, MatchStringL(str(match_val) + f'HEY {ret[1].match_strings}', True)
+
+# def match_child_name(substr: str, opts: dict) -> list:
+#     # should I test whether "name" is str or int?
+#     # the user can supply a dict or list or set in there
+#     return match_child_data(lambda op: (any(substr in str(k) for k in opts.keys()), name), opts)
+# def match_child_val(substr: str, opts: dict) -> list:
+#     # the "value" is only the leave of this dict-based tree
+#     return match_child_data(lambda n, val: match_only_leafs(substr, val), opts)
 
 def match_substr(substr: str, opts: dict) -> list:
     '''match_substr(substr: str, opts: dict) -> list
@@ -548,7 +582,7 @@ def match_options_to_selectors(opt_paths: list, patterns: list, stdscr) -> list:
             if not isinstance(opts, dict):
                 # TODO: just return a list of match strings and convert it to full strings when needed
                 #mstring = MatchString('.'.join(path + [str(i) for i in p]) + '=' + str(opts), False)
-                flat_option = path, MatchStringL(f'{opts}')
+                flat_option = path, opts if isinstance(opts, MatchStringL) else MatchStringL(f'{opts}')
                 flat_opts.append(flat_option)
                 continue
 
@@ -560,8 +594,9 @@ def match_options_to_selectors(opt_paths: list, patterns: list, stdscr) -> list:
               #flat_opts.append(mstring)
               #print(path, p, v)
               #flat_option = path + [i if isinstance(i, MatchStringL) else MatchStringL(i) for i in p] + [MatchStringL(f'={v}')]
-              flat_option = (path + [i if isinstance(i, MatchStringL) else MatchStringL(str(i)) for i in p], MatchStringL(f'{v}'))
-              flat_opts.append(flat_option)
+              flat_path = path + [i if isinstance(i, MatchStringL) else MatchStringL(str(i)) for i in p]
+              val = v if isinstance(v, MatchStringL) else MatchStringL(f'{v}')
+              flat_opts.append((flat_path, val))
 
         return flat_opts
 
@@ -585,10 +620,13 @@ def match_options_to_selectors(opt_paths: list, patterns: list, stdscr) -> list:
 
         next_opt_paths = [] #[OptionPath([tomatch], opt_paths[0].options)]
         for path, opts in opt_paths:
+            accum_res = [] # the child search has to deepcopy the options
             if   pm[0] == '>':
-                matched_opts = match_child_name(tomatch, opts)
+                #matched_opts = match_child_name(tomatch, opts)
+                matched_opts = match_child_data(tomatch, match_opt_names, opts, accum_res)
             elif pm[0] == '=':
-                matched_opts = match_child_val(tomatch, opts)
+                #matched_opts = match_child_val(tomatch, opts)
+                matched_opts = match_child_data(tomatch, match_opt_values, opts, accum_res)
 
             for op in matched_opts:
                 next_opt_paths.append(OptionPath(path + op.path, op.options))
@@ -899,7 +937,8 @@ def main(action_menu=None):
         # seave through the substrings
         if patterns:
             #matched_opts = match_options_to_selectors(opts, patterns, stdscr)
-            matched_opt_paths = match_options_to_selectors(opts, patterns, stdscr)
+            opts_to_match = deepcopy(opts)
+            matched_opt_paths = match_options_to_selectors(opts_to_match, patterns, stdscr)
             #import pdb
             #pdb.set_trace()
             #matched_opts = flatten_opt_paths(matched_opt_paths)
@@ -956,15 +995,24 @@ def main(action_menu=None):
                     stdscr.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
 
                 if not isinstance(substr, MatchStringL):
+                    #stdscr.addstr(str(substr) + "DEBUG!", line_opt | styleNormalText)
                     stdscr.addstr(str(substr), line_opt | styleNormalText)
 
                 else:
                     #opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
                     #stdscr.addstr(substr.content, opt)
                     # def print_to_curses(self, stdscr, line_option, styleMatchedText, styleNormalText, coord=None):
+                    #stdscr.addstr("WAT?!", line_opt | styleNormalText)
                     substr.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
 
-            stdscr.addstr(f'={val}', line_opt | styleNormalText)
+            # print the value leafs
+            # check if they got matched
+            if isinstance(val, MatchStringL):
+                stdscr.addstr('=', line_opt | styleNormalText)
+                val.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
+
+            else:
+                stdscr.addstr(f'={val}', line_opt | styleNormalText)
 
         # Print selected options (debugging?)
         for i, sel_opt_num in enumerate(selected_opts):
