@@ -176,7 +176,7 @@ some_nested_structure = {'some':
         'and_cases': {'foo': {'bar': 88}, 'baz': {'Bar': 55}},
         'more': {'nestings': 67, 5: 'five'},
         'and': 'only_string',
-        'only_strings': {'foo': 'bar', 'baz': 'qwe'}
+        'only_strings': {'foo': 'bar', 'baz': 'qwe', 'plus': {'and': 'five', 'more': 'less'}},
         }
 
 opts = []
@@ -466,6 +466,7 @@ def match_child_data(lambda_for_key_val, opts: dict) -> list:
 
     # the current options match
     if any(lambda_for_key_val(name, val) for name, val in opts.items()):
+        #return [OptionPath([str(opts.items())], opts)]
         #return [OptionPath(['DEBUG'], opts)]
         return [OptionPath([], opts)]
 
@@ -482,10 +483,13 @@ def match_child_data(lambda_for_key_val, opts: dict) -> list:
     return matched_opt_paths
 
 def match_child_name(substr: str, opts: dict) -> list:
+    # should I test whether "name" is str or int?
+    # the user can supply a dict or list or set in there
     return match_child_data(lambda name, v: substr in str(name), opts)
 
 def match_child_val(substr: str, opts: dict) -> list:
-    return match_child_data(lambda n, val: substr in str(val), opts)
+    # the "value" is only the leave of this dict-based tree
+    return match_child_data(lambda n, val: False if isinstance(val, dict) else substr in str(val), opts)
 
 def match_substr(substr: str, opts: dict) -> list:
     '''match_substr(substr: str, opts: dict) -> list
