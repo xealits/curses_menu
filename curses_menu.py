@@ -5,6 +5,7 @@ https://stackoverflow.com/questions/18551558/how-to-use-terminal-color-palette-w
 """
 
 import sys
+import logging
 import re
 from copy import deepcopy
 
@@ -112,12 +113,129 @@ xml_options = '''<?xml version="1.0"?>
 '''
 
 from collections import namedtuple
-MatchString = namedtuple('MatchString', 'content ismatch')
-_DataPoint  = namedtuple('DataPoint', 'path value', defaults=(None, None))
-class DataPoint(_DataPoint):
-    def __str__(self):
-        return f'{self.path}={self.value}'
+from collections.abc import Mapping
 
+class OptNode:
+    def __init__(self, name, value=None, children=set()):
+        #super().__init__(*args) # not needed?
+        self.name = name
+        self.value = value
+        self.children = children
+
+        if self.children is not None:
+            assert(isinstance(self.children, set))
+
+            # check that all children are OptNode
+            for item in self.children:
+                assert isinstance(item, OptNode)
+
+        self._highlight_name = 0, 0 # no highlight
+        self._highlight_value = False
+
+    def __hash__(self):
+        return hash((self.name, self.value))
+
+    def __repr__(self):
+        return f'OptNode({self.name}, {self.value}, {self.children})'
+
+    def __str__(self):
+        if self.value is not None:
+            return f'{self.name}={self.value}'
+
+        else:
+            return f'{self.name}'
+
+    def print_flat(self, prefix=''):
+        prefix_self = prefix + str(self)
+        print(prefix_self)
+
+        for n in self.children:
+            n.print_flat(prefix_self + '.')
+
+    def highlight_name(self, start, end):
+        assert start < end < len(self.name)
+        self._highlight_name = start, end
+
+    def highlight_value(self, new_bool):
+        # TODO: value is not necessarily a string, what if it is a dictionary?
+        # let's just highlight all of it now
+        self._highlight_value = new_bool
+
+    def print_to_menu(self, cursor, styleMatchedText, styleNormalText, coord=None):
+        '''print_to_menu(self, cursor, coord=None)
+
+        prints it to curses, with necessary highlights
+
+        cursor -- the curses cursor
+        coord = (line_num, char_pos) -- optional setting for cursor position
+        '''
+
+        if coord is not None:
+            line_num, char_pos = coord
+            cursor.move(line_num, char_pos)
+
+        pre = self.name[:self._highlight_name[0]]
+        highlight = self.name[self._highlight_name[0]:self._highlight_name[1]]
+        post = self.name[self._highlight_name[1]:]
+
+        cursor.addstr(pre, styleNormalText)
+        cursor.addstr(highlight, styleMatchedText)
+        cursor.addstr(post, styleNormalText)
+
+        if self.value is not None:
+            # print the value too
+            # add =
+            cursor.addstr('=', styleNormalText)
+            # value
+            to_highlight = styleMatchedText if self._highlight_value else styleNormalText
+            cursor.addstr(self.value, to_highlight)
+
+def opt_tree(pydict):
+    '''OptTree(pydict):
+
+    Translation from a Python Mapping to a tree of `OptNode` option nodes.
+    A node is a name, an optional value, and an optional mapping to child nodes.
+    A Python mapping is translated into a set of nodes as:
+    * a key that is a tuple becomes an OptNode and its value is an OptNode
+    * a key that is not a tuple, with a non-dict value becomes a leaf OptNode
+      i.e. with no child nodes
+    * a key with value that is a mapping becomes an OptNode with no value
+      but with children made out of the mapping
+    '''
+
+    if isinstance(pydict, OptNode):
+        return set((pydict,))
+
+    if not isinstance(pydict, Mapping):
+        # it is a value
+        # TODO: handle a tuple here?
+        return set((OptNode(pydict),))
+
+    # it is a Python mapping
+    nodes = set()
+    for k, v in pydict.items():
+        if isinstance(k, tuple):
+            name, val = k
+            nodes.add(OptNode(name, val, opt_tree(v)))
+
+        # leaf in the Python dict
+        elif not isinstance(v, Mapping):
+            nodes.add(OptNode(k, v))
+
+        else:
+            nodes.add(OptNode(k, None, opt_tree(v)))
+
+    return nodes
+
+class DataPoint(namedtuple('DataPoint', 'path value', defaults=(None, None))):
+    def __str__(self):
+        if self.value is not None:
+            return f'{self.path}={self.value}'
+
+        else:
+            return f'{self.path}'
+
+MatchString = namedtuple('MatchString', 'content ismatch')
 OptionPath = namedtuple('OptionPath', 'path options')
 # path is a list of match strings
 # options is a dictionary
@@ -180,6 +298,9 @@ some_nested_structure = {'some':
             'plus': {'and': 'five', 'more': 'less'},
             'Connectivity': 'PPB1A'},
         }
+
+some_nested_structure_nodes = opt_tree(some_nested_structure)
+
 
 opts = []
 for p, v in iteritems_recursive(some_nested_structure):
@@ -889,7 +1010,13 @@ class Comline:
         # if one of known keys
         return True
 
-def main(action_menu=None):
+def main(action_menu=None, logger=None):
+  if logger is None:
+      logger = logging.getLogger(__file__)
+      hdlr = logging.FileHandler(__file__ + ".log")
+      logger.addHandler(hdlr)
+      logger.setLevel(logging.DEBUG)
+
   def curses_program(stdscr):
     #global comline, comline_cur
     comline = Comline(prompt='> ')
@@ -929,6 +1056,8 @@ def main(action_menu=None):
         #if DEBUG: cur_line += print_comline_info(stdscr, cur_line)
 
         if DEBUG:
+            logger.debug(f'{cur_line:2} 0 user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+
             if ord(k[0]) != 0:
                 stdscr.addstr(cur_line, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
             else:
@@ -1080,16 +1209,20 @@ def main(action_menu=None):
         # as the arrow keys -- the same hand types everything
         # there should be a large key button on the left hand!
         elif ord(k[0]) == 10 and len(matched_opts) > 0 and action_menu is not None:
+            logger.debug(f'{cur_line:2} key ENTER passed: matched_opts={matched_opts} action_menu={action_menu}')
+
             # launch the action menu
             if selected_opts:
                 action_menu(stdscr, [opts[i] for i in selected_opts])
 
             else: # act on all matched
-                opt_to_act = [opts[i] for i, _ in matched_opts]
-                action_menu(stdscr, opt_to_act)
+                #opt_to_act = [opts[i] for i, _ in matched_opts]
+                action_menu(stdscr, [opts[i] for i in matched_opts])
 
         # ok, just use TAB to move to the action on the selected options
         elif ord(k[0]) == 9 and len(matched_opts) > 0:
+            logger.debug(f'{cur_line:2} key TAB passed: matched_opts={matched_opts} cur_select_cursor={cur_select_cursor}')
+
             opt_num, _ = matched_opts[cur_select_cursor]
             if opt_num in selected_opts:
                 selected_opts.discard(opt_num)
@@ -1223,6 +1356,10 @@ def action_write(screen, options, comline_string):
 
 if __name__ == "__main__":
     from sys import argv
+    logger = logging.getLogger(__file__)
+    hdlr = logging.FileHandler(__file__ + ".log")
+    logger.addHandler(hdlr)
+    logger.setLevel(logging.DEBUG)
 
     if '--demo' in argv:
         print('running the demo')
