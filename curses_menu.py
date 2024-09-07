@@ -116,9 +116,9 @@ from collections import namedtuple
 from collections.abc import Mapping
 
 class OptNode:
-    def __init__(self, name, value=None, children=set()):
+    def __init__(self, name, value=None, children=set(), logger=None):
         #super().__init__(*args) # not needed?
-        self.name = name
+        self.name = str(name) # TODO: not sure if name is always str
         self.value = value
         self.children = children
 
@@ -136,7 +136,7 @@ class OptNode:
         return hash((self.name, self.value))
 
     def __repr__(self):
-        return f'OptNode({self.name}, {self.value}, {self.children})'
+        return f'OptNode({repr(self.name)}, {repr(self.value)}, {repr(self.children)})'
 
     def __str__(self):
         if self.value is not None:
@@ -145,21 +145,20 @@ class OptNode:
         else:
             return f'{self.name}'
 
-    def print_flat(self, prefix=''):
-        prefix_self = prefix + str(self)
-        print(prefix_self)
-
-        for n in self.children:
-            n.print_flat(prefix_self + '.')
-
     def highlight_name(self, start, end):
-        assert start < end < len(self.name)
+        assert start < end <= len(self.name)
         self._highlight_name = start, end
 
     def highlight_value(self, new_bool):
         # TODO: value is not necessarily a string, what if it is a dictionary?
         # let's just highlight all of it now
         self._highlight_value = new_bool
+
+    def clear_highlights(self):
+        self._highlight_name = 0, 0
+        self._highlight_value = False
+        for c in self.children:
+            c.clear_highlights()
 
     def print_to_menu(self, cursor, styleMatchedText, styleNormalText, coord=None):
         '''print_to_menu(self, cursor, coord=None)
@@ -189,6 +188,110 @@ class OptNode:
             # value
             to_highlight = styleMatchedText if self._highlight_value else styleNormalText
             cursor.addstr(self.value, to_highlight)
+
+    def opt_list(self, prefix_list=[]):
+        prefix_self = prefix_list + [self]
+        yield prefix_self
+
+        for opt in [c.opt_list(prefix_self) for c in self.children]:
+            yield from opt
+
+    def print_flat(self, prefix=''):
+        #prefix_self = prefix + str(self)
+        #print(prefix_self)
+
+        #for n in self.children:
+        #    n.print_flat(prefix_self + '.')
+        for opt in self.opt_list():
+            print('.'.join(str(i) for i in opt))
+
+    def match_name(self, substr):
+        if substr not in self.name:
+            return False
+
+        match_ind = self.name.index(substr)
+        self.highlight_name(match_ind, match_ind+len(substr))
+        return True
+
+    def match_selector(self, selector):
+        '''match_selector(self, selector)
+
+        Returns True or False. Matches the basic selectors:
+        = for value
+        . for basic type
+        the rest is name match
+        '''
+        assert len(selector) > 0
+        if selector[0] in ('=', '.'):
+            assert len(selector) > 1
+
+        if selector[0] == '=' and selector[1:] == str(self.value):
+            return True
+
+        if selector[0] == '.':
+            if selector[1:] == 'int' and type(self.value) == int:
+                return True
+
+            if selector[1:] == 'float' and type(self.value) == float:
+                return True
+
+            if selector[1:] == 'str' and type(self.value) == str:
+                return True
+
+        return self.match_name(selector)
+
+    def match_selectors(self, selectors, prev_nodes=[]):
+        '''match_selectors(self, selectors, prev_nodes=[]):
+
+        In general, matching returns an option list from the tree of OptNode-s.
+        Therefore `match_selector` returns True or False whether this node
+        matched the selector, and sets the highlights in self node, and in the
+        child nodes if needed.
+
+        Special selectors:
+        = for value
+        . for basic types of value
+        > prefix to match child nodes, including [.=]
+        '''
+
+        assert len(selectors) > 0
+        #if len(selectors) == 0:
+        #    # the all selectors got mathed
+        #    for opt in self.opt_list():
+        #        #yield prev_nodes + opt
+        #        return prev_nodes + opt
+
+        sel = selectors[0]
+        assert len(sel) > 0
+
+        # skip empty special selectors
+        #if sel[0] in ('>', '=', '.') and len(sel) == 1:
+        if all(ch in ('>', '=', '.') for ch in sel):
+            if logger is not None: # TODO: add a default logger
+                logger.warning(f'got an empty special selector: {sel}')
+            selectors = selectors[1:]
+
+        matched = False
+        if sel[0] == '>':
+            # children names
+            cnode_selector = sel[1:]
+
+            for c in self.children:
+                #yield from c.match_selectors([sel[0][1:]] + selectors[1:], prev_nodes + [self])
+                matched |= c.match_selector(cnode_selector)
+
+        else:
+            matched = self.match_selector(sel)
+
+        next_selectors = selectors[1:] if matched else selectors
+        if len(next_selectors) == 0:
+            # done
+            for opt in self.opt_list():
+                yield prev_nodes + opt
+
+        else:
+            for c in self.children:
+                yield from c.match_selectors(next_selectors, prev_nodes + [self])
 
 def opt_tree(pydict):
     '''OptTree(pydict):
@@ -301,6 +404,9 @@ some_nested_structure = {'some':
 
 some_nested_structure_nodes = opt_tree(some_nested_structure)
 
+for n in some_nested_structure_nodes:
+    for opt in n.match_selectors(['oo', 'ba']):
+        print('.'.join(str(node) for node in opt))
 
 opts = []
 for p, v in iteritems_recursive(some_nested_structure):
