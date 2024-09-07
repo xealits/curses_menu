@@ -187,7 +187,7 @@ class OptNode:
             cursor.addstr('=', styleNormalText)
             # value
             to_highlight = styleMatchedText if self._highlight_value else styleNormalText
-            cursor.addstr(self.value, to_highlight)
+            cursor.addstr(str(self.value), to_highlight)
 
     def opt_list(self, prefix_list=[]):
         prefix_self = prefix_list + [self]
@@ -226,6 +226,7 @@ class OptNode:
             assert len(selector) > 1
 
         if selector[0] == '=' and selector[1:] == str(self.value):
+            self.highlight_value(True)
             return True
 
         if selector[0] == '.':
@@ -254,6 +255,28 @@ class OptNode:
         > prefix to match child nodes, including [.=]
         '''
 
+        # test and clean up the selectors here
+        checked_selectors = []
+        for sel in selectors:
+            assert len(sel) > 0
+
+            if all(ch in ('>', '=', '.') for ch in sel):
+                if logger is not None: # TODO: add a default logger
+                    logger.warning(f'got an empty special selector: {sel}')
+                continue
+
+            checked_selectors.append(sel)
+
+        # run the recursive matching
+        if len(checked_selectors) == 0:
+            # done
+            for opt in self.opt_list():
+                yield prev_nodes + opt
+
+        else:
+            yield from self._match_selectors(checked_selectors, prev_nodes)
+
+    def _match_selectors(self, selectors, prev_nodes=[]):
         assert len(selectors) > 0
         #if len(selectors) == 0:
         #    # the all selectors got mathed
@@ -264,14 +287,17 @@ class OptNode:
         sel = selectors[0]
         assert len(sel) > 0
 
-        # skip empty special selectors
-        #if sel[0] in ('>', '=', '.') and len(sel) == 1:
-        if all(ch in ('>', '=', '.') for ch in sel):
-            if logger is not None: # TODO: add a default logger
-                logger.warning(f'got an empty special selector: {sel}')
-            selectors = selectors[1:]
+        ## skip empty special selectors
+        ##if sel[0] in ('>', '=', '.') and len(sel) == 1:
+        #if all(ch in ('>', '=', '.') for ch in sel):
+        #    if logger is not None: # TODO: add a default logger
+        #        logger.warning(f'got an empty special selector: {sel}')
+        #    selectors = selectors[1:]
+        #    sel = selectors[0]
+        #    #self.match_selectors(selectors[1:], prev_nodes)
 
         matched = False
+        matched_self = False
         if sel[0] == '>':
             # children names
             cnode_selector = sel[1:]
@@ -281,7 +307,7 @@ class OptNode:
                 matched |= c.match_selector(cnode_selector)
 
         else:
-            matched = self.match_selector(sel)
+            matched = matched_self = self.match_selector(sel)
 
         next_selectors = selectors[1:] if matched else selectors
         if len(next_selectors) == 0:
@@ -289,9 +315,14 @@ class OptNode:
             for opt in self.opt_list():
                 yield prev_nodes + opt
 
+        elif matched and not matched_self:
+            # matched something in child nodes
+            # the matching process stays at this node
+            yield from self._match_selectors(next_selectors, prev_nodes)
+
         else:
             for c in self.children:
-                yield from c.match_selectors(next_selectors, prev_nodes + [self])
+                yield from c._match_selectors(next_selectors, prev_nodes + [self])
 
 def opt_tree(pydict):
     '''OptTree(pydict):
@@ -402,11 +433,10 @@ some_nested_structure = {'some':
             'Connectivity': 'PPB1A'},
         }
 
-some_nested_structure_nodes = opt_tree(some_nested_structure)
-
-for n in some_nested_structure_nodes:
-    for opt in n.match_selectors(['oo', 'ba']):
-        print('.'.join(str(node) for node in opt))
+# TODO: make a docstring here
+#for n in some_nested_structure_nodes:
+#    for opt in n.match_selectors(['oo', 'ba']):
+#        print('.'.join(str(node) for node in opt))
 
 opts = []
 for p, v in iteritems_recursive(some_nested_structure):
@@ -423,6 +453,13 @@ def flatten_opt_paths(opt_paths):
             flat_opts.append((path + list(p), v))
 
     return flat_opts
+
+some_nested_structure_nodes = opt_tree(some_nested_structure)
+opts = []
+for node in some_nested_structure_nodes:
+    opts += list(node.opt_list())
+
+# opts should be a flat options list
 
 '''
 OptionTagRaw = namedtuple('OptionTag', 'name value type', defaults=('tag', None, None))
@@ -1170,14 +1207,23 @@ def main(action_menu=None, logger=None):
                 stdscr.addstr(cur_line, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
             cur_line += 1
 
+        # clear the previous highlights:
+        for n in some_nested_structure_nodes:
+            n.clear_highlights()
+
         # act on the user input as a set of substrings to find
         patterns = comline.split()
 
         # seave through the substrings
         if patterns:
             #matched_opts = match_options_to_selectors(opts, patterns, stdscr)
-            opts_to_match = deepcopy(opts)
-            matched_opt_paths = match_options_to_selectors(opts_to_match, patterns, stdscr)
+            #opts_to_match = deepcopy(opts)
+            #matched_opt_paths = match_options_to_selectors(opts_to_match, patterns, stdscr)
+
+            matched_opt_paths = []
+            for n in some_nested_structure_nodes:
+                for opt in n.match_selectors(patterns):
+                    matched_opt_paths.append(opt)
             #import pdb
             #pdb.set_trace()
             #matched_opts = flatten_opt_paths(matched_opt_paths)
@@ -1201,7 +1247,8 @@ def main(action_menu=None, logger=None):
 
         else:
             #matched_opts = [(i, [MatchString(o, False)]) for i, (o, v) in enumerate(opts)]
-            matched_opts = flatten_opt_paths(opts)
+            #matched_opts = flatten_opt_paths(opts)
+            matched_opts = opts
 
         if cur_select_cursor >= len(matched_opts):
             cur_select_cursor = len(matched_opts) - 1
@@ -1212,7 +1259,8 @@ def main(action_menu=None, logger=None):
 
         line_offset = cur_line
         #for matched_o_num, (opt_num, matched_o) in enumerate(matched_opts):
-        for matched_o_num, (matched_o, val) in enumerate(matched_opts):
+        #for matched_o_num, (matched_o, val) in enumerate(matched_opts):
+        for matched_o_num, matched_opt_list in enumerate(matched_opts):
             # split into substrings
             if matched_o_num >= __max_y: # if it goes outside the screen
                 break
@@ -1223,35 +1271,41 @@ def main(action_menu=None, logger=None):
             else:
                 select_prompt = '  '
 
+            # TODO: add the selected options
             line_opt = styleNormalText
             #if opt_num in selected_opts:
             #    line_opt = styleSelectLine
 
             # Print the matched options
             stdscr.addstr(line_offset+matched_o_num, 0, select_prompt)
-            for i, substr in enumerate(matched_o):
+            #for i, substr in enumerate(matched_o):
+            #    if i != 0:
+            #        stdscr.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
+
+            #    if not isinstance(substr, MatchStringL):
+            #        #stdscr.addstr(str(substr) + "DEBUG!", line_opt | styleNormalText)
+            #        stdscr.addstr(str(substr), line_opt | styleNormalText)
+
+            #    else:
+            #        #opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
+            #        #stdscr.addstr(substr.content, opt)
+            #        # def print_to_curses(self, stdscr, line_option, styleMatchedText, styleNormalText, coord=None):
+            #        #stdscr.addstr("WAT?!", line_opt | styleNormalText)
+            #        substr.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
+
+            ## print the value leafs
+            ## check if they got matched
+            #if isinstance(val, MatchStringL):
+            #    stdscr.addstr('=', line_opt | styleNormalText)
+            #    val.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
+
+            #else:
+            #    stdscr.addstr(f'={val}', line_opt | styleNormalText)
+
+            for i, opt in enumerate(matched_opt_list):
                 if i != 0:
                     stdscr.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
-
-                if not isinstance(substr, MatchStringL):
-                    #stdscr.addstr(str(substr) + "DEBUG!", line_opt | styleNormalText)
-                    stdscr.addstr(str(substr), line_opt | styleNormalText)
-
-                else:
-                    #opt = line_opt | (styleMatchedText if substr.ismatch else styleNormalText)
-                    #stdscr.addstr(substr.content, opt)
-                    # def print_to_curses(self, stdscr, line_option, styleMatchedText, styleNormalText, coord=None):
-                    #stdscr.addstr("WAT?!", line_opt | styleNormalText)
-                    substr.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
-
-            # print the value leafs
-            # check if they got matched
-            if isinstance(val, MatchStringL):
-                stdscr.addstr('=', line_opt | styleNormalText)
-                val.print_to_curses(stdscr, line_opt, styleMatchedText, styleNormalText)
-
-            else:
-                stdscr.addstr(f'={val}', line_opt | styleNormalText)
+                opt.print_to_menu(stdscr, styleMatchedText, styleNormalText)
 
         # Print selected options (debugging?)
         for i, sel_opt_num in enumerate(selected_opts):
