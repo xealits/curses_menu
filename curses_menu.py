@@ -1390,7 +1390,8 @@ def main(action_menu=None, logger=None):
 
             else: # act on all matched
                 #opt_to_act = [opts[i] for i, _ in matched_opts]
-                action_menu(stdscr, [opts[i] for i in matched_opts])
+                #action_menu(stdscr, [opts[i] for i in matched_opts])
+                action_menu(stdscr, [i for i in matched_opts])
 
         # ok, just use TAB to move to the action on the selected options
         elif ord(k[0]) == 9 and len(matched_opts) > 0:
@@ -1459,6 +1460,7 @@ def menu_action(action_polling, action_writing):
         screen.addstr(3, 0, 'just printing the selected options, and no action on ENTER')
         screen.addstr(4, 0, f'writing: {action_writing_output}')
         screen.addstr(5, 0, f'{time()}')
+        screen.addstr(6, 0, f'{len(options)}')
 
         #screen.move(0, len(prompt) + comline.cur_pos)
         comline.set_cursor(screen)
@@ -1521,8 +1523,22 @@ def menu_action(action_polling, action_writing):
   return action
 
 def action_view(screen, options, line_offset=20):
-    for i, opt in enumerate(options):
-        screen.addstr(line_offset+i, 0, str(opt))
+    #for i, opt in enumerate(options):
+    #    screen.addstr(line_offset+i, 0, str(opt))
+    styleNormalText = curses.A_NORMAL
+    line_opt = styleNormalText
+
+    for i, opt_list in enumerate(options):
+        #opt.print_to_menu(screen, styleMatchedText, styleNormalText)
+        #opt.print_to_menu(screen, styleNormalText, styleNormalText, (line_offset, 0))
+
+        for opt_i, opt in enumerate(opt_list):
+            if opt_i != 0:
+                screen.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
+                opt.print_to_menu(screen, styleNormalText, styleNormalText)
+
+            else:
+                opt.print_to_menu(screen, styleNormalText, styleNormalText, (line_offset+i, 0))
 
 def action_write(screen, options, comline_string):
    return f'NOT doing anything with {comline_string}'
