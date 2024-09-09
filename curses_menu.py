@@ -116,17 +116,19 @@ from collections import namedtuple
 from collections.abc import Mapping
 
 class OptNode:
-    def __init__(self, name, value=None, children=set(), logger=None):
+    def __init__(self, name, value=None, children=set(), parents=set(), logger=None):
         #super().__init__(*args) # not needed?
         self.name = str(name) # TODO: not sure if name is always str
         self.value = value
         self.children = children
+        self.parents  = parents
 
-        if self.children is not None:
-            assert(isinstance(self.children, set))
+        #
+        for set_param in (self.children, self.parents):
+            assert(isinstance(set_param, set))
 
             # check that all children are OptNode
-            for item in self.children:
+            for item in set_param:
                 assert isinstance(item, OptNode)
 
         self._highlight_name = 0, 0 # no highlight
@@ -190,11 +192,17 @@ class OptNode:
             cursor.addstr(str(self.value), to_highlight)
 
     def opt_list(self, prefix_list=[]):
-        prefix_self = prefix_list + [self]
-        yield prefix_self
+        # case of a cycle in the graph
+        if self in prefix_list:
+            #yield prefix_self
+            yield prefix_list + [self]
 
-        for opt in [c.opt_list(prefix_self) for c in self.children]:
-            yield from opt
+        else:
+            prefix_self = prefix_list + [self]
+            yield prefix_self
+
+            for opt in [c.opt_list(prefix_self) for c in self.children]:
+                yield from opt
 
     def print_flat(self, prefix=''):
         #prefix_self = prefix + str(self)
@@ -324,7 +332,7 @@ class OptNode:
             for c in self.children:
                 yield from c._match_selectors(next_selectors, prev_nodes + [self])
 
-def opt_tree(pydict):
+def opt_tree(pydict, parent_nodes=set()):
     '''OptTree(pydict):
 
     Translation from a Python Mapping to a tree of `OptNode` option nodes.
@@ -340,24 +348,29 @@ def opt_tree(pydict):
     if isinstance(pydict, OptNode):
         return set((pydict,))
 
+    if isinstance(pydict, tuple):
+        node_name, node_val = pydict
+        return set((OptNode(node_name, node_val, children=set(), parents=parent_nodes),))
+
     if not isinstance(pydict, Mapping):
-        # it is a value
-        # TODO: handle a tuple here?
-        return set((OptNode(pydict),))
+        # it is just one value
+        # we save it as the node name
+        return set((OptNode(pydict, value=None, children=set(), parents=parent_nodes),))
 
     # it is a Python mapping
+    # i.e. a set of nodes
     nodes = set()
     for k, v in pydict.items():
         if isinstance(k, tuple):
             name, val = k
-            nodes.add(OptNode(name, val, opt_tree(v)))
+            nodes.add(OptNode(name, val, children=opt_tree(v), parents=parent_nodes))
 
         # leaf in the Python dict
         elif not isinstance(v, Mapping):
-            nodes.add(OptNode(k, v))
+            nodes.add(OptNode(k, v, children=set(), parents=parent_nodes))
 
         else:
-            nodes.add(OptNode(k, None, opt_tree(v)))
+            nodes.add(OptNode(k, None, children=opt_tree(v), parents=parent_nodes))
 
     return nodes
 
@@ -370,7 +383,7 @@ class DataPoint(namedtuple('DataPoint', 'path value', defaults=(None, None))):
             return f'{self.path}'
 
 MatchString = namedtuple('MatchString', 'content ismatch')
-OptionPath = namedtuple('OptionPath', 'path options')
+OptionPath  = namedtuple('OptionPath', 'path options')
 # path is a list of match strings
 # options is a dictionary
 
