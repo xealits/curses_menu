@@ -615,6 +615,243 @@ class Comline:
         # if one of known keys
         return True
 
+#
+#
+
+class MenuProg:
+    def __init__(self, poling_prog=None, action_prog=None, logger=None):
+        #self.comline_prog = comline_prog
+        self.poling_prog  = poling_prog
+        self.action_prog  = action_prog
+        self.logger = logger
+
+        # the options graph
+        self.opts = set()
+
+    def __call__(self, cscreen):
+        logger.debug('MenuProg')
+
+        # if no options, exit
+        if not self.opts:
+            if self.logger is not None:
+                logger.debug('MenuProg was called with no options')
+            return
+
+        comline = Comline(prompt='> ')
+
+        styleMatchedText = curses.color_pair( 1 )
+        #curses.init_pair(1,curses.COLOR_BLACK, curses.COLOR_CYAN)
+        styleNormalText = curses.A_NORMAL
+        styleSelectLine = curses.A_BOLD | curses.A_REVERSE # | curses.color_pair(2)
+
+        cscreen.clear()
+        while True:
+            cscreen.erase()
+            # comline program?
+            # process the input and print the comline?
+            # the comline returns processes the input and returns itself
+            # the polling prog does whatever with the:
+            # screen, comline, and options -- and returns selected options? or more?
+            # the action prog does something on the selected options and the rest
+            # action program is a nested MenuProg
+            # clear the previous highlights:
+            for n in self.opts:
+                n.clear_highlights()
+
+            ## act on the user input as a set of substrings to find
+            #patterns = comline.split()
+            if self.poling_prog:
+                logger.debug('MenuProg: poll iteration')
+                self.poling_prog(cscreen, comline, self.opts, self.action_prog, self.logger)
+                # it processes the user keys
+                # draws to the screen
+                # loads the comline
+                # what if the input is ENTER?
+                # -- it is supposed to call it?
+                # then why return selected options at all?
+
+            #c = cscreen.getch()
+            #cscreen.getch()
+            #cscreen.erase()
+
+            # just pause it
+            logger.debug('MenuProg: iteration pause')
+            #cscreen.getch()
+
+class StdMainMenu:
+    def __init__(self):
+        self.cur_select_cursor = 0
+
+    def __call__(self, screen, comline, opts_graph, action_prog, logger):
+        # the set of selected option lists
+        selected_opts = set()
+
+        # TODO: global implicit expected styling: pair 1
+        styleMatchedText = curses.color_pair( 1 )
+        #curses.init_pair(1,curses.COLOR_BLACK, curses.COLOR_CYAN)
+        styleNormalText = curses.A_NORMAL
+        styleSelectLine = curses.A_BOLD | curses.A_REVERSE # | curses.color_pair(2)
+
+        __max_y, __max_x = screen.getmaxyx()
+
+        k = " "
+        #cur_select_cursor = 0
+
+        cur_line = 0
+        # print the UI for the user
+        screen.addstr(cur_line, 0, f'UI info: ESC to exit, type to search & select, up-down-tab to cherry pick, ENTER to act on selection')
+        cur_line += 1
+
+        # print the command line
+        cur_line += comline.print_to_scr(screen, cur_line, debug=DEBUG)
+
+        if DEBUG:
+            logger.debug(f'{cur_line:2} 0 user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+
+            if ord(k[0]) != 0:
+                screen.addstr(cur_line, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            else:
+                screen.addstr(cur_line, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            cur_line += 1
+
+        # act on the user input as a set of substrings to find
+        patterns = comline.split()
+
+        # seave through the substrings
+        if patterns:
+            matched_opt_paths = []
+            for n in opts_graph:
+                for opt in n.match_selectors(patterns):
+                    matched_opt_paths.append(opt)
+
+            matched_opts = matched_opt_paths
+            logger.debug(f'matched opts {len(matched_opts)}')
+
+        else:
+            #matched_opts = opts_graph
+            # just return all possible options
+            # flat list of option lists
+            matched_opts = []
+            for node in opts_graph:
+                matched_opts += list(node.opt_list())
+
+        if self.cur_select_cursor >= len(matched_opts):
+            self.cur_select_cursor = len(matched_opts) - 1
+            # it will make the cursor negative when there are no matches
+
+        if self.cur_select_cursor < 0 and len(matched_opts) > 0:
+            self.cur_select_cursor = 0
+
+        line_offset = cur_line
+        for matched_o_num, matched_opt_list in enumerate(matched_opts):
+            # split into substrings
+            if matched_o_num >= __max_y: # if it goes outside the screen
+                break
+
+            if matched_o_num == self.cur_select_cursor:
+                select_prompt = '> '
+
+            else:
+                select_prompt = '  '
+
+            # TODO: add the selected options
+            line_opt = styleNormalText
+            #if opt_num in selected_opts:
+            #    line_opt = styleSelectLine
+
+            # Print the matched options
+            screen.addstr(line_offset+matched_o_num, 0, select_prompt)
+
+            for i, opt in enumerate(matched_opt_list):
+                if i != 0:
+                    screen.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
+                opt.print_to_menu(screen, styleMatchedText, styleNormalText)
+
+        # Print selected options (debugging?)
+        for i, sel_opt_num in enumerate(selected_opts):
+            screen.addstr(cur_line+i, 0, opts[sel_opt_num])
+
+        comline.set_cursor(screen)
+        #screen.move(0, len(prompt) + comline.cur_pos)
+
+        try:
+            k = screen.getkey() # get character or timeout
+
+        except curses.error as e:
+            # capture the timeout
+            if str(e) == "no input":
+                return
+            else:
+                raise e
+
+        screen.refresh()
+
+        if ord(k[0]) == KEY_ESC:
+            # Don't wait for another key
+            # If it was Alt then curses has already sent the other key
+            # otherwise -1 is sent (Escape)
+            screen.nodelay(True)
+            n = screen.getch()
+
+            if n == -1:
+                # Escape was pressed
+                sys.exit(0)
+
+            # Return to delay
+            screen.nodelay(False)
+            # run something on alt-<n>
+            #cur.puts(f'user alt-char: {n}')
+
+            # else it's an ALT
+            if n == ord('w'):
+                #screen.addstr(50, 0, "alt-w !")
+                #res = comline_remove_last_word(comline_cur, comline)
+                #if not res:
+                #    continue
+                #comline, comline_cur = res
+                comline.remove_last_word()
+
+        # up-down control the selection among the matched options
+        elif k == "KEY_UP":
+            if self.cur_select_cursor > 0:
+                self.cur_select_cursor -= 1
+        elif k == "KEY_DOWN":
+            if self.cur_select_cursor < len(matched_opts) - 1:
+                self.cur_select_cursor += 1
+
+        # capture ENTER to select and deselect options?
+        # ENTER is bad, because it is on the same side of keyboard
+        # as the arrow keys -- the same hand types everything
+        # there should be a large key button on the left hand!
+        elif ord(k[0]) == 10 and len(matched_opts) > 0 and action_prog is not None:
+            logger.debug(f'{cur_line:2} key ENTER passed: matched_opts={matched_opts} action_prog={action_prog}')
+
+            # launch the action menu
+            if selected_opts:
+                action_prog(screen, [opts[i] for i in selected_opts])
+
+            else: # act on all matched
+                #opt_to_act = [opts[i] for i, _ in matched_opts]
+                #action_prog(screen, [opts[i] for i in matched_opts])
+                action_prog(screen, [i for i in matched_opts])
+
+        # ok, just use TAB to move to the action on the selected options
+        elif ord(k[0]) == 9 and len(matched_opts) > 0:
+            logger.debug(f'{cur_line:2} key TAB passed: matched_opts={matched_opts} cur_select_cursor={self.cur_select_cursor}')
+
+            opt_num, _ = matched_opts[self.cur_select_cursor]
+            if opt_num in selected_opts:
+                selected_opts.discard(opt_num)
+            else:
+                selected_opts.add(opt_num)
+
+        # comline edit has to be the last
+        # because of "printable" option:
+        # comline edit inserts this into the comline string
+        # but the above KEY_UP etc are also printable strings
+        elif comline.edit_key(k):
+            pass # if the comline knows how to processes this key
+
 def main(action_menu=None, logger=None):
   if logger is None:
       logger = logging.getLogger(__file__)
@@ -929,6 +1166,18 @@ def action_view(screen, options, line_offset=20):
 def action_write(screen, options, comline_string):
    return f'NOT doing anything with {comline_string}'
 
+def curses_setup(curses_screen):
+    curses.start_color()
+    curses.use_default_colors()
+
+    highligh_color = 30 # the blue-green use match color
+    curses.init_pair(1, highligh_color, -1)
+
+    s = StdMainMenu()
+    m = MenuProg(s, None, logger)
+    m.opts = some_nested_structure_nodes
+    m(curses_screen)
+
 if __name__ == "__main__":
     from sys import argv
     logger = logging.getLogger(__file__)
@@ -959,5 +1208,6 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         #opts = await _uals()
         opts = asyncio.run(_uals(parser))
 
-    wrapper(main(menu_action(action_view, action_write)))
+    #wrapper(main(menu_action(action_view, action_write)))
+    wrapper(curses_setup)
 
