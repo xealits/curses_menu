@@ -238,14 +238,11 @@ class OptNode:
             return True
 
         if selector[0] == '.':
-            if selector[1:] == 'int' and type(self.value) == int:
-                return True
-
-            if selector[1:] == 'float' and type(self.value) == float:
-                return True
-
-            if selector[1:] == 'str' and type(self.value) == str:
-                return True
+            type_matched = False
+            type_matched |= selector[1:] == 'int' and type(self.value) == int
+            type_matched |= selector[1:] == 'float' and type(self.value) == float
+            type_matched |= selector[1:] == 'str' and type(self.value) == str
+            return type_matched
 
         return self.match_name(selector)
 
