@@ -329,6 +329,77 @@ class OptNode:
             for c in self.children:
                 yield from c._match_selectors(next_selectors, prev_nodes + [self])
 
+# match the flat list of options, not the graph
+def match_opts_list(prev_opts, selectors, remaining_opts):
+    #assert len(selectors) > 0
+    if len(selectors) == 0:
+        # the all selectors got mathed
+        return True # prev_opts + remaining_opts
+
+    sel = selectors[0]
+    assert len(sel) > 0
+
+    if len(remaining_opts) == 0:
+        # no match
+        return False # []
+
+    cur_node = remaining_opts[0]
+
+    # skip empty special selectors
+    #if sel[0] in ('>', '=', '.') and len(sel) == 1:
+    if all(ch in ('>', '=', '.') for ch in sel):
+        if logger is not None: # TODO: add a default logger
+            logger.warning(f'got an empty special selector: {sel}')
+        #selectors = selectors[1:]
+        #sel = selectors[0]
+        return match_opts_list(prev_opts, selectors[1:], remaining_opts)
+
+    matched = False
+    matched_self = False
+    if sel[0] == '>':
+        # children names
+        cnode_selector = sel[1:]
+
+        for c in cur_node.children:
+            #yield from c.match_selectors([sel[0][1:]] + selectors[1:], prev_nodes + [self])
+            matched |= c.match_selector(cnode_selector)
+
+    else:
+        matched = matched_self = cur_node.match_selector(sel)
+
+    next_selectors = selectors[1:] if matched else selectors
+    #if len(next_selectors) == 0:
+    #    # done
+    #    #for opt in self.opt_list():
+    #    #    yield prev_nodes + opt
+    #    return 
+
+    if matched and not matched_self:
+        # matched something in child nodes
+        # the matching process stays at this node
+        #yield from self._match_selectors(next_selectors, prev_nodes)
+        # basically repeat matching the current node
+        return match_opts_list(prev_opts, next_selectors, remaining_opts)
+
+    else:
+        # matched or no this node - check children
+        # first check if all is fine
+        # TODO: all this logic needs to be corrected, including at the beginning of the func
+        if len(next_selectors)==0:
+            # all matched
+            return True # prev_opts + remaining_opts
+
+        # matched self, but more selectors remain -- need to check children
+        # no children nodes -- no match
+        if not cur_node.children:
+            return False # []
+
+        for c in cur_node.children:
+            #yield from c._match_selectors(next_selectors, prev_nodes + [self])
+            return match_opts_list(prev_opts+[cur_node], next_selectors, remaining_opts[1:])
+
+    assert False
+
 def opt_tree(pydict, parent_nodes=set()):
     '''OptTree(pydict):
 
@@ -392,6 +463,15 @@ some_nested_structure = {'some':
 
 # convert to OptNode
 some_nested_structure_nodes = opt_tree(some_nested_structure)
+
+test_patterns = 'oo >qwe ena'.split()
+test_matched_opts = []
+for node in some_nested_structure_nodes:
+    #
+    opts_lists = list(node.opt_list())
+    for opt_list in opts_lists:
+        if match_opts_list([], test_patterns, opt_list):
+            test_matched_opts.append(opt_list)
 
 # opts should be a flat options list
 
@@ -698,20 +778,25 @@ class MenuProg:
             patterns = comline.split()
 
             # seave through the substrings
+            matched_opts = []
             if patterns:
-                matched_opt_paths = []
-                for n in opts_graph:
-                    for opt in n.match_selectors(patterns):
-                        matched_opt_paths.append(opt)
+                #for n in opts_graph:
+                #    for opt in n.match_selectors(patterns):
+                #        matched_opt_paths.append(opt)
 
-                matched_opts = matched_opt_paths
+                for node in opts_graph:
+                    #
+                    opts_lists = list(node.opt_list())
+                    for opt_list in opts_lists:
+                        if match_opts_list([], patterns, opt_list):
+                            matched_opts.append(opt_list)
+
                 logger.debug(f'matched opts {len(matched_opts)}')
 
             else:
                 #matched_opts = opts_graph
                 # just return all possible options
                 # flat list of option lists
-                matched_opts = []
                 for node in opts_graph:
                     matched_opts += list(node.opt_list())
 
@@ -755,12 +840,16 @@ class MenuProg:
             #screen.move(0, len(prompt) + comline.cur_pos)
 
             try:
+                logger.debug('MenuProg: getkey()')
                 k = cscreen.getkey() # get character or timeout
+                logger.debug(f'MenuProg: getkey()={k}')
 
             except curses.error as e:
                 # capture the timeout
                 if str(e) == "no input":
-                    return
+                    logger.debug(f'MenuProg: getkey() no input')
+                    continue
+
                 else:
                     raise e
 
@@ -805,7 +894,7 @@ class MenuProg:
             # as the arrow keys -- the same hand types everything
             # there should be a large key button on the left hand!
             elif ord(k[0]) == 10 and len(matched_opts) > 0 and self.next_prog is not None:
-                logger.debug(f'{cur_line:2} key ENTER passed: matched_opts={matched_opts} next_prog={self.next_prog}')
+                logger.debug(f'{cur_line:2} key ENTER passed: len(matched_opts)={len(matched_opts)} next_prog={self.next_prog}')
 
                 #if next_prog:
                 #    next_prog(cscreen, opts, next_prog, logger)
@@ -816,15 +905,19 @@ class MenuProg:
                 #    # -- it is supposed to call it?
                 #    # then why return selected options at all?
 
+                for n in opts_graph:
+                    n.clear_highlights()
+
                 # launch the action menu
                 if selected_opts:
                     #action_prog(screen, [opts[i] for i in selected_opts])
-                    self.next_prog(cscreen, [opts[i] for i in selected_opts], logger)
+                    _ = self.next_prog(cscreen, [opts[i] for i in selected_opts], logger)
 
                 else: # act on all matched
                     #opt_to_act = [opts[i] for i, _ in matched_opts]
                     #action_prog(screen, [opts[i] for i in matched_opts])
-                    self.next_prog(cscreen, [i for i in matched_opts], logger)
+                    _ = self.next_prog(cscreen, [i for i in matched_opts], logger)
+                    logger.debug('MenuProg: next_prog for matched options')
 
             # ok, just use TAB to move to the action on the selected options
             elif ord(k[0]) == 9 and len(matched_opts) > 0:
@@ -843,7 +936,6 @@ class MenuProg:
             elif comline.edit_key(k):
                 pass # if the comline knows how to processes this key
 
-
             #c = cscreen.getch()
             #cscreen.getch()
             #cscreen.erase()
@@ -852,20 +944,27 @@ class MenuProg:
             logger.debug('MenuProg: iteration pause')
             #cscreen.getch()
 
-class StdMonitor:
-    def __init__(self, next_prog=None):
-        self.next_prog = next_prog
+        logger.debug('MenuProg: exit the UI loop')
 
-    def __call__(self, cscreen, opts_graph=set(), logger=None):
+class StdMonitor:
+    def __init__(self, next_prog=None, timeout=1000, line_offset=20):
+        self.next_prog = next_prog
+        self.timeout = timeout
+        self.line_offset = line_offset
+
+    def __call__(self, cscreen, opts_list=[], logger=None):
         logger.debug('StdMonitor')
 
         # if no options, exit
-        if not opts_graph:
+        if not opts_list:
             if logger is not None:
                 logger.debug('StdMonitor was called with no options')
             return
 
         comline = Comline(prompt='> ')
+
+        cscreen.clear()
+        cscreen.timeout(self.timeout) # time to wait for character
 
         styleMatchedText = curses.color_pair( 1 )
         #curses.init_pair(1,curses.COLOR_BLACK, curses.COLOR_CYAN)
@@ -873,26 +972,44 @@ class StdMonitor:
         styleSelectLine = curses.A_BOLD | curses.A_REVERSE # | curses.color_pair(2)
 
         cscreen.clear()
+
+        prompt = "> "
+        k = " "
         while True:
             logger.debug('StdMonitor: poll iteration')
             cscreen.erase()
 
-            for n in opts_graph:
-                n.clear_highlights()
-
-            cscreen.addstr(0, 0, f'UI info: ESC to go back, type and ENTER to write to all selected options, it reads every {timeout}ms')
+            cscreen.addstr(0, 0, f'UI info: ESC to go back, type and ENTER to write to all selected options, it reads every {self.timeout}ms')
             #cscreen.addstr(0, 0, f'{prompt}{comline}')
             comline.print_to_scr(cscreen, 1, debug=DEBUG)
             cscreen.addstr(2, 0, ' '*(len(prompt) + comline.cur_pos) + "^")
             cscreen.addstr(3, 0, 'just printing the selected options, and no action on ENTER')
-            cscreen.addstr(4, 0, f'writing: {action_writing_output}')
+            #cscreen.addstr(4, 0, f'writing: {action_writing_output}')
             cscreen.addstr(5, 0, f'{time()}')
-            cscreen.addstr(6, 0, f'{len(options)}')
+            cscreen.addstr(6, 0, f'{len(opts_list)}')
 
             #cscreen.move(0, len(prompt) + comline.cur_pos)
             comline.set_cursor(cscreen)
 
-            action_polling(cscreen, options)
+            #action_polling(cscreen, opts_list)
+
+            #def action_view(screen, options, line_offset=20):
+            #for i, opt in enumerate(options):
+            #    screen.addstr(line_offset+i, 0, str(opt))
+            styleNormalText = curses.A_NORMAL
+            line_opt = styleNormalText
+
+            for i, opt_list in enumerate(opts_list):
+                #opt.print_to_menu(screen, styleMatchedText, styleNormalText)
+                #opt.print_to_menu(screen, styleNormalText, styleNormalText, (line_offset, 0))
+
+                for opt_i, opt in enumerate(opt_list):
+                    if opt_i != 0:
+                        cscreen.addstr(FIELD_SEPARATOR, line_opt | styleNormalText)
+                        opt.print_to_menu(cscreen, styleNormalText, styleNormalText)
+
+                    else:
+                        opt.print_to_menu(cscreen, styleNormalText, styleNormalText, (self.line_offset+i, 0))
 
             # draw the cscreen and getkey
             cscreen.refresh()
@@ -940,9 +1057,10 @@ class StdMonitor:
             # ENTER is bad, because it is on the same side of keyboard
             # as the arrow keys -- the same hand types everything
             # there should be a large key button on the left hand!
-            elif ord(k[0]) == 10:
+            elif ord(k[0]) == 10 and self.next_prog is not None:
                 # launch the write action
-                action_writing_output = action_writing(cscreen, options, str(comline))
+                #action_writing_output = action_writing(cscreen, options, str(comline))
+                self.next_prog(cscreen, opts_list, logger)
 
             elif comline.edit_key(k):
                 pass # if the comline knows how to processes this key
