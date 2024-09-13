@@ -205,14 +205,14 @@ class OptNode:
             for opt in [c.opt_list(prefix_self) for c in self.children]:
                 yield from opt
 
-    def print_flat(self, prefix=''):
+    def print_flat(self, delimeter='.'):
         #prefix_self = prefix + str(self)
         #print(prefix_self)
 
         #for n in self.children:
         #    n.print_flat(prefix_self + '.')
         for opt in self.opt_list():
-            print('.'.join(str(i) for i in opt))
+            print(delimeter.join(str(i) for i in opt))
 
     def match_name(self, substr):
         if substr not in self.name:
@@ -474,6 +474,9 @@ for node in some_nested_structure_nodes:
         if match_opts_list([], test_patterns, opt_list):
             test_matched_opts.append(opt_list)
 
+#for node in some_nested_structure_nodes:
+#    node.print_flat()
+
 # opts should be a flat options list
 
 DEBUG = True
@@ -506,11 +509,12 @@ def _comline_remove_last_word(comline_cur, comline):
     return new_comline, comline_cur
 
 class Comline:
-    def __init__(self, prompt='> '):
+    def __init__(self, prompt='> ', logger=None):
         self.comline = ""
         self.cur_pos = 0
         self.prompt  = prompt
         self.cur_line = 0 # the line where the comline was printed the last time
+        self.logger = logger
 
     def __repr__(self):
         return f'Comline(prompt={self.prompt})'
@@ -766,14 +770,14 @@ class MenuProg:
             # print the command line
             cur_line += comline.print_to_scr(cscreen, cur_line, debug=DEBUG)
 
-            if DEBUG:
-                logger.debug(f'{cur_line:2} 0 user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            logger.debug(f'{cur_line:2} 0 user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            #if DEBUG:
 
-                if ord(k[0]) != 0:
-                    cscreen.addstr(cur_line, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
-                else:
-                    cscreen.addstr(cur_line, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
-                cur_line += 1
+            #    #if ord(k[0]) != 0:
+            #    #    cscreen.addstr(cur_line, 0, f'user char: {k} {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            #    #else:
+            #    #    cscreen.addstr(cur_line, 0, f'user char: <null_character> {len(k)} {ord(k[0])} {ord(k[0]) == KEY_ESC}')
+            #    #cur_line += 1
 
             # act on the user input as a set of substrings to find
             patterns = comline.split()
@@ -792,7 +796,7 @@ class MenuProg:
                         if match_opts_list([], patterns, opt_list):
                             matched_opts.append(opt_list)
 
-                logger.debug(f'matched opts {len(matched_opts)}')
+                #logger.debug(f'matched opts {len(matched_opts)}') # TODO: for some reason asyncua messes this up
 
             else:
                 #matched_opts = opts_graph
@@ -811,7 +815,7 @@ class MenuProg:
             line_offset = cur_line
             for matched_o_num, matched_opt_list in enumerate(matched_opts):
                 # split into substrings
-                if matched_o_num >= __max_y: # if it goes outside the screen
+                if line_offset + matched_o_num >= __max_y: # if it goes outside the screen
                     break
 
                 if matched_o_num == self.cur_select_cursor:
@@ -841,9 +845,9 @@ class MenuProg:
             #screen.move(0, len(prompt) + comline.cur_pos)
 
             try:
-                logger.debug('MenuProg: getkey()')
+                #logger.debug('MenuProg: getkey()') # TODO: for some reason, when asyncua works this prints to stdout instead of the logger file
                 k = cscreen.getkey() # get character or timeout
-                logger.debug(f'MenuProg: getkey()={k}')
+                #logger.debug(f'MenuProg: getkey()={k}')
 
             except curses.error as e:
                 # capture the timeout
@@ -942,7 +946,7 @@ class MenuProg:
             #cscreen.erase()
 
             # just pause it
-            logger.debug('MenuProg: iteration pause')
+            #logger.debug('MenuProg: iteration pause') # TODO: asyncua messes up the logging
             #cscreen.getch()
 
         logger.debug('MenuProg: exit the UI loop')
@@ -1066,7 +1070,12 @@ class StdMonitor:
             elif comline.edit_key(k):
                 pass # if the comline knows how to processes this key
 
-def curses_setup(logger=None):
+def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
+    logger = logging.getLogger(__file__)
+    hdlr = logging.FileHandler(__file__ + ".log")
+    logger.addHandler(hdlr)
+    logger.setLevel(logging.DEBUG)
+
     def curses_prog(curses_screen):
         curses.start_color()
         curses.use_default_colors()
@@ -1076,16 +1085,17 @@ def curses_setup(logger=None):
 
         #s = StdMainMenu()
         #m = MenuProg(s, None, logger)
-        #m.opts = some_nested_structure_nodes
+        #m.opts = opts_graphs
         #m(curses_screen)
 
         #
         m = MenuProg(StdMonitor())
-        m(curses_screen, some_nested_structure_nodes, logger)
+        m(curses_screen, opts_graphs, logger)
 
     return curses_prog
 
 if __name__ == "__main__":
+
     from sys import argv
     logger = logging.getLogger(__file__)
     hdlr = logging.FileHandler(__file__ + ".log")
@@ -1094,6 +1104,7 @@ if __name__ == "__main__":
 
     if '--demo' in argv:
         print('running the demo')
+        opts = some_nested_structure_nodes
 
     else:
         import argparse
@@ -1113,8 +1124,21 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         from get_opcua_datapoints import _uals
 
         #opts = await _uals()
-        opts = asyncio.run(_uals(parser))
+        opts = {asyncio.run(_uals(parser))}
+        #for node in opts:
+        #    #node.print_flat(' > ')
+        #    print(node)
+
+        #import pdb
+        #pdb.set_trace()
+
+        #for node in opts:
+        #    for opts_list in node.opt_list():
+        #        #
+        #        print(' > '.join(str(i) for i in opts_list))
+
+        #exit(0)
 
     #wrapper(main(menu_action(action_view, action_write)))
-    wrapper(curses_setup(logger))
+    wrapper(curses_setup(opts, logger))
 

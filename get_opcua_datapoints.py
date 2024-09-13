@@ -2,6 +2,7 @@ import asyncio
 from asyncua import Node, Client #, Server
 from asyncua.tools import add_minimum_args, add_common_args, parse_args, _configure_client_with_args, get_node, _lsprint_0, _lsprint_1, _lsprint_long
 import sys, concurrent
+from curses_menu import OptNode
 
 #add_minimum_args(parser)
 
@@ -20,7 +21,7 @@ def print_node_description(desc):
 
     return desc.NodeId.to_string()
 
-async def act_on_node(node, res_list=[], act_on_desc=print_node_description):
+async def act_on_node(node, parent_node, prefix=''):
     #
     for desc in await node.get_children_descriptions():
         #
@@ -30,16 +31,23 @@ async def act_on_node(node, res_list=[], act_on_desc=print_node_description):
         #    except UaStatusCodeError as err:
         #        val = "Bad (0x{0:x})".format(err.code)
 
-        res_list.append(act_on_desc(desc))
+        #res_list.append(print_node_description(desc))
+        full_name = print_node_description(desc)
+        name = full_name.split('.')[-1]
+        new_node = OptNode(name, None, set(), {parent_node})
+        parent_node.children.add(new_node)
+
+        #print(prefix + name + f' : {new_node}')
+
         # and recurse into the child nodes
         if hasattr(node, 'session'): # newer asyncua and Python
-            await act_on_node(Node(node.session, desc.NodeId), res_list, act_on_desc)
+            await act_on_node(Node(node.session, desc.NodeId), new_node, prefix+'-')
         elif hasattr(node, 'server'): # older, Python 3.6 (which is deprecated and unsafe since a few years already)
-            await act_on_node(Node(node.server,  desc.NodeId), res_list, act_on_desc)
+            await act_on_node(Node(node.server,  desc.NodeId), new_node, prefix+'-')
         else:
             raise Exception('unknown version of asyncua')
 
-async def _uals(parser) -> list:
+async def _uals(parser) -> set:
     '''_uals(parser)
 
     parser: argparse.ArgumentParser
@@ -60,7 +68,8 @@ async def _uals(parser) -> list:
     client = Client(args.url, timeout=args.timeout)
     await _configure_client_with_args(client, args)
 
-    all_the_dps = []
+    #all_the_dps = []
+    opt_graph = OptNode('OPCRoot', None, set(), set())
 
     try:
         async with client:
@@ -80,14 +89,14 @@ async def _uals(parser) -> list:
 
             # the problem is that all of this is done under async routines
             # so, the browsing recursion must be an async def
-            await act_on_node(node, all_the_dps)
+            await act_on_node(node, opt_graph)
 
     except (OSError, concurrent.futures.TimeoutError) as e:
         print(e)
         sys.exit(1)
     #sys.exit(0)
 
-    return all_the_dps
+    return opt_graph
 
 if __name__ == '__main__':
     import argparse
@@ -99,3 +108,4 @@ if __name__ == '__main__':
     print(f'got these: {dps}')
     for dp in dps:
         print(dp)
+
