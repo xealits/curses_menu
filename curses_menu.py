@@ -1070,7 +1070,7 @@ class StdMonitor:
             elif comline.edit_key(k):
                 pass # if the comline knows how to processes this key
 
-def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
+def curses_setup(opts_graphs=some_nested_structure_nodes, menu_filter_classes=(), logger=None):
     logger = logging.getLogger(__file__)
     hdlr = logging.FileHandler(__file__ + ".log")
     logger.addHandler(hdlr)
@@ -1088,8 +1088,13 @@ def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
         #m.opts = opts_graphs
         #m(curses_screen)
 
-        #
-        m = MenuProg(StdMonitor())
+        prog_pipe = None
+        for MenuFilter in reversed(menu_filter_classes):
+            prev_pipe = prog_pipe
+            prog_pipe = MenuFilter(prev_pipe)
+
+        #m = MenuProg(StdMonitor())
+        m = MenuProg(prog_pipe)
         m(curses_screen, opts_graphs, logger)
 
     return curses_prog
@@ -1105,6 +1110,7 @@ if __name__ == "__main__":
     if '--demo' in argv:
         print('running the demo')
         opts = some_nested_structure_nodes
+        menu_filters = (StdMonitor,)
 
     else:
         import argparse
@@ -1124,7 +1130,9 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         from get_opcua_datapoints import _uals
 
         #opts = await _uals()
-        opts = {asyncio.run(_uals(parser))}
+        opts, opc_client = {asyncio.run(_uals(parser))}
+        menu_filters = (StdMonitor,)
+
         #for node in opts:
         #    #node.print_flat(' > ')
         #    print(node)
@@ -1140,5 +1148,5 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         #exit(0)
 
     #wrapper(main(menu_action(action_view, action_write)))
-    wrapper(curses_setup(opts, logger))
+    wrapper(curses_setup(opts, menu_filters, logger))
 
