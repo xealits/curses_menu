@@ -1080,11 +1080,7 @@ class StdMonitor:
             elif comline.edit_key(k):
                 pass # if the comline knows how to processes this key
 
-def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
-    #logger = logging.getLogger(__file__)
-    #hdlr = logging.FileHandler(__file__ + ".log")
-    #logger.addHandler(hdlr)
-    #logger.setLevel(logging.DEBUG)
+def curses_setup(opts_graphs=some_nested_structure_nodes, menu_filter_classes=(), logger=None):
 
     def curses_prog(curses_screen):
         curses.start_color()
@@ -1098,8 +1094,13 @@ def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
         #m.opts = opts_graphs
         #m(curses_screen)
 
-        #
-        m = MenuProg(StdMonitor())
+        prog_pipe = None
+        for MenuFilter in reversed(menu_filter_classes):
+            prev_pipe = prog_pipe
+            prog_pipe = MenuFilter(prev_pipe)
+
+        #m = MenuProg(StdMonitor())
+        m = MenuProg(prog_pipe)
         m(curses_screen, opts_graphs, logger)
 
     print(logger.handlers)
@@ -1117,6 +1118,7 @@ if __name__ == "__main__":
     if '--demo' in argv:
         print('running the demo')
         opts = some_nested_structure_nodes
+        menu_filters = (StdMonitor,)
 
     else:
         import argparse
@@ -1136,7 +1138,9 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         from get_opcua_datapoints import _uals
 
         #opts = await _uals()
-        opts = {asyncio.run(_uals(parser))}
+        opts, opc_client = {asyncio.run(_uals(parser))}
+        menu_filters = (StdMonitor,)
+
         #for node in opts:
         #    #node.print_flat(' > ')
         #    print(node)
@@ -1151,24 +1155,5 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
 
         #exit(0)
 
-        ##logger = logging.getLogger(__file__)
-        #hdlr = logging.FileHandler(__file__ + ".log_asyncua")
-        ##logger.addHandler(hdlr)
-        ##logger.setLevel(logging.DEBUG)
-
-        #loggers = [logging.getLogger(n) for n in logging.root.manager.loggerDict]
-        #for l in loggers:
-        #    if not l.handlers:
-        #        l.addHandler(hdlr)
-        #        l.setLevel(logging.DEBUG)
-
-    #loggers = [logging.getLogger(n) for n in logging.root.manager.loggerDict]
-    #for l in loggers:
-    #    print(l.handlers)
-    #print()
-
-    #wrapper(main(menu_action(action_view, action_write)))
-    #print(logger.handlers)
-    wrapper(curses_setup(opts, logger))
-    #print(logger.handlers)
+    wrapper(curses_setup(opts, menu_filters, logger))
 
