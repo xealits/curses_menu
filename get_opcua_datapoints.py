@@ -122,7 +122,7 @@ async def _uals(parser) -> set:
         sys.exit(1)
     #sys.exit(0)
 
-    return opt_graph
+    return opt_graph, client
 
 async def write_opc(client, opts_lists, enter_value, logger=None):
     try:
@@ -150,7 +150,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="Browse OPC-UA server and print all the DPs")
 
-    dps = asyncio.run(_uals(parser))
+    dps, client = asyncio.run(_uals(parser))
     #dps = await _uals()
 
     opts_lists = dps.opt_list()

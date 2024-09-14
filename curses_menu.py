@@ -1138,7 +1138,8 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
         from get_opcua_datapoints import _uals
 
         #opts = await _uals()
-        opts, opc_client = {asyncio.run(_uals(parser))}
+        opts_node, opc_client = asyncio.run(_uals(parser))
+        opts = {opts_node}
         menu_filters = (StdMonitor,)
 
         #for node in opts:
