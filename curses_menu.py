@@ -1095,9 +1095,9 @@ def curses_setup(opts_graphs=some_nested_structure_nodes, menu_filter_classes=()
         #m(curses_screen)
 
         prog_pipe = None
-        for MenuFilter in reversed(menu_filter_classes):
-            prev_pipe = prog_pipe
-            prog_pipe = MenuFilter(prev_pipe)
+        for menu_filter in reversed(menu_filter_classes):
+            menu_filter.next_prog = prog_pipe
+            prog_pipe = menu_filter
 
         #m = MenuProg(StdMonitor())
         m = MenuProg(prog_pipe)
@@ -1118,7 +1118,7 @@ if __name__ == "__main__":
     if '--demo' in argv:
         print('running the demo')
         opts = some_nested_structure_nodes
-        menu_filters = (StdMonitor,)
+        menu_filters = (StdMonitor(),)
 
     else:
         import argparse
@@ -1135,12 +1135,13 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
 
         # the asyncua example
         import asyncio
-        from get_opcua_datapoints import _uals
+        from get_opcua_datapoints import _uals, OpcWriteOptions
 
         #opts = await _uals()
         opts_node, opc_client = asyncio.run(_uals(parser))
+        print(f'opc_client: {opc_client}')
         opts = {opts_node}
-        menu_filters = (StdMonitor,)
+        menu_filters = (StdMonitor(), OpcWriteOptions(opc_client))
 
         #for node in opts:
         #    #node.print_flat(' > ')

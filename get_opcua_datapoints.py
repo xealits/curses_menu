@@ -99,6 +99,7 @@ async def _uals(parser) -> set:
 
     try:
         async with client:
+            #await client.connect()
             node = await get_node(client, args)
             print(f"Browsing node {node} at {args.url}\n")
 
@@ -119,32 +120,54 @@ async def _uals(parser) -> set:
 
     except (OSError, concurrent.futures.TimeoutError) as e:
         print(e)
+        client.disconnect()
         sys.exit(1)
     #sys.exit(0)
 
     return opt_graph, client
 
 async def write_opc(client, opts_lists, enter_value, logger=None):
+    node_fullname = None
     try:
         async with client:
             for opt_list in opts_lists:
-                node = await get_node(client, '.'.join(opts_list))
-                print(f"Browsing node {node} at {args.url}\n")
+                node_fullname = '.'.join(n.name for n in opt_list)
+                #node = await get_node(client, node_fullname)
+                node = client.get_node(node_fullname)
+                print(f"Browsing node {node}")
                 #await act_on_node(node, opt_graph)
-                await node.write_value(enter_value)
+                if enter_value in ("true", "True", "false", "False"):
+                    value = enter_value in ("true", "True")
+                else:
+                    value = enter_value
+
+                await node.write_value(value)
 
     except (OSError, concurrent.futures.TimeoutError) as e:
         print(e)
+        print(f"node {node_fullname}")
+        client.disconnect()
         sys.exit(1)
+
+    except Exception as e:
+        #print(e)
+
+        #import pdb
+        #pdb.set_trace()
+
+        raise Exception(f"node {node_fullname} client {client}") from e
+        client.disconnect()
+        sys,exit(2)
     #sys.exit(0)
 
 class OpcWriteOptions:
-    def __init__(self, opc_client):
+    def __init__(self, opc_client, next_prog=None):
         self.opc_client = opc_client
+        self.next_prog = next_prog
         
-    def __call__(self, cscreen, opts_list=[], enter_str='', logger=None):
+    def __call__(self, cscreen, opts_lists=[], enter_str='', logger=None):
         logger.debug('OpcWriteOptions')
-        write_opc(self.opc_client, opts_lists, enter_str, logger)
+        asyncio.run(write_opc(self.opc_client, opts_lists, enter_str, logger))
 
 if __name__ == '__main__':
     import argparse
