@@ -215,10 +215,20 @@ class OptNode:
             print(delimeter.join(str(i) for i in opt))
 
     def match_name(self, substr):
+        # TODO: just add full regexp
+        match_last = False
+        if substr[-1] == '$':
+            substr = substr[:-1]
+            match_last = True
+
         if substr not in self.name:
             return False
 
         match_ind = self.name.index(substr)
+
+        if substr in self.name and match_last and self.name[match_ind:] != substr:
+            return False
+
         self.highlight_name(match_ind, match_ind+len(substr))
         return True
 
@@ -916,12 +926,12 @@ class MenuProg:
                 # launch the action menu
                 if selected_opts:
                     #action_prog(screen, [opts[i] for i in selected_opts])
-                    _ = self.next_prog(cscreen, [opts[i] for i in selected_opts], logger)
+                    _ = self.next_prog(cscreen, [opts[i] for i in selected_opts], patterns, logger)
 
                 else: # act on all matched
                     #opt_to_act = [opts[i] for i, _ in matched_opts]
                     #action_prog(screen, [opts[i] for i in matched_opts])
-                    _ = self.next_prog(cscreen, [i for i in matched_opts], logger)
+                    _ = self.next_prog(cscreen, [i for i in matched_opts], patterns, logger)
                     logger.debug('MenuProg: next_prog for matched options')
 
             # ok, just use TAB to move to the action on the selected options
@@ -957,7 +967,7 @@ class StdMonitor:
         self.timeout = timeout
         self.line_offset = line_offset
 
-    def __call__(self, cscreen, opts_list=[], logger=None):
+    def __call__(self, cscreen, opts_list=[], enter_str='', logger=None):
         logger.debug('StdMonitor')
 
         # if no options, exit
@@ -1065,16 +1075,16 @@ class StdMonitor:
             elif ord(k[0]) == 10 and self.next_prog is not None:
                 # launch the write action
                 #action_writing_output = action_writing(cscreen, options, str(comline))
-                self.next_prog(cscreen, opts_list, logger)
+                self.next_prog(cscreen, opts_list, str(comline), logger)
 
             elif comline.edit_key(k):
                 pass # if the comline knows how to processes this key
 
 def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
-    logger = logging.getLogger(__file__)
-    hdlr = logging.FileHandler(__file__ + ".log")
-    logger.addHandler(hdlr)
-    logger.setLevel(logging.DEBUG)
+    #logger = logging.getLogger(__file__)
+    #hdlr = logging.FileHandler(__file__ + ".log")
+    #logger.addHandler(hdlr)
+    #logger.setLevel(logging.DEBUG)
 
     def curses_prog(curses_screen):
         curses.start_color()
@@ -1092,6 +1102,7 @@ def curses_setup(opts_graphs=some_nested_structure_nodes, logger=None):
         m = MenuProg(StdMonitor())
         m(curses_screen, opts_graphs, logger)
 
+    print(logger.handlers)
     return curses_prog
 
 if __name__ == "__main__":
@@ -1100,7 +1111,8 @@ if __name__ == "__main__":
     logger = logging.getLogger(__file__)
     hdlr = logging.FileHandler(__file__ + ".log")
     logger.addHandler(hdlr)
-    logger.setLevel(logging.DEBUG)
+    #logger.setLevel(logging.INFO)
+    logger.setLevel(logging.ERROR)
 
     if '--demo' in argv:
         print('running the demo')
@@ -1139,6 +1151,24 @@ Beware, uasync won't work on Python 3.6, it needs 3.9 or higher. Check python --
 
         #exit(0)
 
+        ##logger = logging.getLogger(__file__)
+        #hdlr = logging.FileHandler(__file__ + ".log_asyncua")
+        ##logger.addHandler(hdlr)
+        ##logger.setLevel(logging.DEBUG)
+
+        #loggers = [logging.getLogger(n) for n in logging.root.manager.loggerDict]
+        #for l in loggers:
+        #    if not l.handlers:
+        #        l.addHandler(hdlr)
+        #        l.setLevel(logging.DEBUG)
+
+    #loggers = [logging.getLogger(n) for n in logging.root.manager.loggerDict]
+    #for l in loggers:
+    #    print(l.handlers)
+    #print()
+
     #wrapper(main(menu_action(action_view, action_write)))
+    #print(logger.handlers)
     wrapper(curses_setup(opts, logger))
+    #print(logger.handlers)
 

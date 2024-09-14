@@ -1,4 +1,5 @@
 import asyncio
+from asyncua import ua
 from asyncua import Node, Client #, Server
 from asyncua.tools import add_minimum_args, add_common_args, parse_args, _configure_client_with_args, get_node, _lsprint_0, _lsprint_1, _lsprint_long
 import sys, concurrent
@@ -19,12 +20,15 @@ def print_node_description(desc):
     #)
     #print(f"{desc.NodeId.to_string()}")
 
-    return desc.NodeId.to_string()
+    #return desc.NodeId.to_string()
+    return desc.to_string()
 
-async def act_on_node(node, parent_node, prefix=''):
+async def act_on_node(parent_node, parent_node_opt, prefix=''):
     #
-    for desc in await node.get_children_descriptions():
+    for child_node in await parent_node.get_children():
+        #print(type(child_node))
         #
+
         #if desc.NodeClass == ua.NodeClass.Variable:
         #    try:
         #        val = await Node(node.session, desc.NodeId).read_value()
@@ -32,18 +36,40 @@ async def act_on_node(node, parent_node, prefix=''):
         #        val = "Bad (0x{0:x})".format(err.code)
 
         #res_list.append(print_node_description(desc))
-        full_name = print_node_description(desc)
-        name = full_name.split('.')[-1]
-        new_node = OptNode(name, None, set(), {parent_node})
-        parent_node.children.add(new_node)
+        #desc = await child_node.read_description()
+        #full_name = print_node_description(desc)
+        full_name = child_node.nodeid.to_string()
+        #
 
-        #print(prefix + name + f' : {new_node}')
+        # check if that's a leaf node
+        next_children_nodes = await child_node.get_children()
+        value = None
+        #print(next_children_nodes)
+        if not next_children_nodes:
+            # this is a leaf node, save its value etc
+            try:
+                #attr = await child_node.read_attribute(ua.AttributeIds.Value)
+                value = await child_node.read_value()
+
+            #except Exception as e:
+            except ua.uaerrors._auto.BadCommunicationError as e:
+                #print(f'Error reading value of OPC node {child_node}', e)
+                value = None
+
+        name = full_name.split('.')[-1]
+        new_opt = OptNode(name, value, set(), {parent_node_opt})
+
+        parent_node_opt.children.add(new_opt)
+
+        #print(prefix + name + f' : {new_opt}')
 
         # and recurse into the child nodes
-        if hasattr(node, 'session'): # newer asyncua and Python
-            await act_on_node(Node(node.session, desc.NodeId), new_node, prefix+'-')
-        elif hasattr(node, 'server'): # older, Python 3.6 (which is deprecated and unsafe since a few years already)
-            await act_on_node(Node(node.server,  desc.NodeId), new_node, prefix+'-')
+        if hasattr(parent_node, 'session'): # newer asyncua and Python
+            #await act_on_node(Node(parent_node.session, desc.NodeId), new_opt, prefix+'-')
+            await act_on_node(child_node, new_opt, prefix+'-')
+        elif hasattr(parent_node, 'server'): # older, Python 3.6 (which is deprecated and unsafe since a few years already)
+            #await act_on_node(Node(parent_node.server,  desc.NodeId), new_opt, prefix+'-')
+            await act_on_node(child_node, new_opt, prefix+'-')
         else:
             raise Exception('unknown version of asyncua')
 
@@ -69,7 +95,7 @@ async def _uals(parser) -> set:
     await _configure_client_with_args(client, args)
 
     #all_the_dps = []
-    opt_graph = OptNode('OPCRoot', None, set(), set())
+    opt_graph = OptNode(args.nodeid, None, set(), set())
 
     try:
         async with client:
@@ -98,6 +124,28 @@ async def _uals(parser) -> set:
 
     return opt_graph
 
+async def write_opc(client, opts_lists, enter_value, logger=None):
+    try:
+        async with client:
+            for opt_list in opts_lists:
+                node = await get_node(client, '.'.join(opts_list))
+                print(f"Browsing node {node} at {args.url}\n")
+                #await act_on_node(node, opt_graph)
+                await node.write_value(enter_value)
+
+    except (OSError, concurrent.futures.TimeoutError) as e:
+        print(e)
+        sys.exit(1)
+    #sys.exit(0)
+
+class OpcWriteOptions:
+    def __init__(self, opc_client):
+        self.opc_client = opc_client
+        
+    def __call__(self, cscreen, opts_list=[], enter_str='', logger=None):
+        logger.debug('OpcWriteOptions')
+        write_opc(self.opc_client, opts_lists, enter_str, logger)
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="Browse OPC-UA server and print all the DPs")
@@ -105,7 +153,10 @@ if __name__ == '__main__':
     dps = asyncio.run(_uals(parser))
     #dps = await _uals()
 
+    opts_lists = dps.opt_list()
+
     print(f'got these: {dps}')
-    for dp in dps:
-        print(dp)
+    for optlist in opts_lists:
+        #print([(i.name, i.value) for i in optlist])
+        print([(i.name, i.value) for i in optlist])
 
